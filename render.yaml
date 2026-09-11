@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: kargil-marketplace-api
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
