@@ -1,0 +1,10 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+:root { font-family: 'DM Sans', sans-serif; color: #16302b; background: #fffaf4; }
+h1,h2,h3,h4,.font-black { font-family: 'Plus Jakarta Sans', sans-serif; }
+label { display: block; font-size: .875rem; font-weight: 700; }
+label input,label select,label textarea { display:block; width:100%; margin-top:.5rem; border:1px solid rgba(22,48,43,.12); border-radius:.75rem; padding:.8rem 1rem; background:#fffaf4; font-weight:400; outline:none; }
+label input:focus,label select:focus,label textarea:focus { border-color:#0f766e; box-shadow:0 0 0 3px rgba(15,118,110,.1); }
+.hero-grid { background: radial-gradient(circle at 75% 10%, #d9f4ea, transparent 32%), #fffaf4; }
