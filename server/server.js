@@ -7,6 +7,7 @@ import { Strategy as GoogleStrategy } from 'passport-google-oauth20'
 import health from './routes/health.js'
 import shops from './routes/shops.js'
 import products from './routes/products.js'
+import hotels from './routes/hotels.js'
 import auth from './routes/auth.js'
 import User from './models/User.js'
 import { requireAuth } from './middleware/auth.js'
@@ -37,6 +38,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 app.use('/api/health', health)
 app.use('/api/shops', shops)
 app.use('/api/products', products)
+app.use('/api/hotels', hotels)
 app.use('/api/auth', auth)
 app.get('/api/me', requireAuth, (req, res) => res.json({ user: req.user }))
 app.get('/', (req, res) => res.json({ service: 'Kargil Marketplace API', health: '/api/health' }))

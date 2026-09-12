@@ -4,6 +4,11 @@
     {"id":"shop-2","name":"Himalayan Hardware & Home","category":"Home & hardware","location":"Poyen Road, Kargil","contactNumber":"+91 98710 12002","description":"Practical tools, lighting and home supplies for every mountain home.","productIds":["shop-product-4","shop-product-5"]},
     {"id":"shop-3","name":"Ladakh Handloom House","category":"Local crafts","location":"Fort Road, Kargil","contactNumber":"+91 98710 12003","description":"Warm, locally made woollens and thoughtful Ladakhi gifts.","productIds":["shop-product-6","shop-product-7"]}
   ],
+  "hotels": [
+    {"id":"hotel-1","name":"The Kargil Heights","category":"Hotel & restaurant","location":"Main Bazaar, Kargil","contactNumber":"+91 98710 13001","description":"Comfortable rooms, mountain views and a family-friendly restaurant.","rooms":[{"type":"Deluxe room","price":3200,"available":4},{"type":"Family room","price":4800,"available":2}],"foods":["Ladakhi thukpa","Momos","Vegetable pulao","Breakfast combo"]},
+    {"id":"hotel-2","name":"Apricot Tree Residency","category":"Guest house & cafe","location":"Baroo Road, Kargil","contactNumber":"+91 98710 13002","description":"A quiet stay with a cafe serving local snacks and hot drinks.","rooms":[{"type":"Standard room","price":2200,"available":6},{"type":"Twin room","price":2800,"available":3}],"foods":["Apricot cake","Butter tea","Ladakhi bread","Egg noodles"]},
+    {"id":"hotel-3","name":"Himalayan View Inn","category":"Hotel & restaurant","location":"Fort Road, Kargil","contactNumber":"+91 98710 13003","description":"Central hotel with warm rooms and an all-day dining restaurant.","rooms":[{"type":"Single room","price":1800,"available":5},{"type":"Suite","price":5500,"available":1}],"foods":["Chicken curry","Mutton momos","Dal rice","Tea and snacks"]}
+  ],
   "products": [
     {"id":"shop-product-1","shopId":"shop-1","title":"Apricots from Kargil","category":"Groceries","price":320,"unit":"1 kg","description":"Sun-dried local apricots."},
     {"id":"shop-product-2","shopId":"shop-1","title":"Organic barley flour","category":"Groceries","price":140,"unit":"1 kg","description":"Locally milled barley flour."},
