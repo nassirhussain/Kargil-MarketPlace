@@ -1,8 +1,8 @@
 {
   "shops": [
-    {"id":"shop-1","name":"Kargil Super Mart","category":"Groceries","location":"Main Bazaar, Kargil","description":"Everyday groceries, packaged foods and household essentials.","productIds":["shop-product-1","shop-product-2","shop-product-3"]},
-    {"id":"shop-2","name":"Himalayan Hardware & Home","category":"Home & hardware","location":"Poyen Road, Kargil","description":"Practical tools, lighting and home supplies for every mountain home.","productIds":["shop-product-4","shop-product-5"]},
-    {"id":"shop-3","name":"Ladakh Handloom House","category":"Local crafts","location":"Fort Road, Kargil","description":"Warm, locally made woollens and thoughtful Ladakhi gifts.","productIds":["shop-product-6","shop-product-7"]}
+    {"id":"shop-1","name":"Kargil Super Mart","category":"Groceries","location":"Main Bazaar, Kargil","contactNumber":"+91 98710 12001","description":"Everyday groceries, packaged foods and household essentials.","productIds":["shop-product-1","shop-product-2","shop-product-3"]},
+    {"id":"shop-2","name":"Himalayan Hardware & Home","category":"Home & hardware","location":"Poyen Road, Kargil","contactNumber":"+91 98710 12002","description":"Practical tools, lighting and home supplies for every mountain home.","productIds":["shop-product-4","shop-product-5"]},
+    {"id":"shop-3","name":"Ladakh Handloom House","category":"Local crafts","location":"Fort Road, Kargil","contactNumber":"+91 98710 12003","description":"Warm, locally made woollens and thoughtful Ladakhi gifts.","productIds":["shop-product-6","shop-product-7"]}
   ],
   "products": [
     {"id":"shop-product-1","shopId":"shop-1","title":"Apricots from Kargil","category":"Groceries","price":320,"unit":"1 kg","description":"Sun-dried local apricots."},
