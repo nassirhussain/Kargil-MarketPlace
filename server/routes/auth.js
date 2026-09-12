@@ -4,9 +4,10 @@ import jwt from 'jsonwebtoken'
 import passport from 'passport'
 import User from '../models/User.js'
 import { requireAuth } from '../middleware/auth.js'
+import { isMongoReady } from '../lib/mongodb.js'
 
 const router = Router()
-const configured = () => Boolean(process.env.MONGODB_URI && process.env.JWT_SECRET)
+const configured = () => Boolean(process.env.JWT_SECRET && isMongoReady())
 const publicUser = user => ({ id: user.id, email: user.email, name: user.name, phone: user.phone, college: user.college, area: user.area, location: user.location, avatar: user.avatar, role: user.role })
 const tokenFor = user => jwt.sign({ sub: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' })
 const unavailable = (req, res, next) => configured() ? next() : res.status(503).json({ error: 'Authentication is not configured. Set MONGODB_URI and JWT_SECRET.' })

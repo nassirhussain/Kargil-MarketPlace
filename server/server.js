@@ -1,7 +1,6 @@
 import express from 'express'
 import cors from 'cors'
 import 'dotenv/config'
-import mongoose from 'mongoose'
 import passport from 'passport'
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20'
 import health from './routes/health.js'
@@ -11,6 +10,7 @@ import hotels from './routes/hotels.js'
 import auth from './routes/auth.js'
 import User from './models/User.js'
 import { requireAuth } from './middleware/auth.js'
+import { connectMongo, mongoState, seedMongo } from './lib/mongodb.js'
 
 const app = express()
 const port = process.env.PORT || 3001
@@ -45,11 +45,19 @@ app.get('/', (req, res) => res.json({ service: 'Kargil Marketplace API', health:
 app.use((err, req, res, next) => { console.error(err); res.status(500).json({ error: 'Unable to read marketplace data' }) })
 app.listen(port, async () => {
   console.log(`Kargil Marketplace API listening on http://localhost:${port}`)
-  if (!process.env.MONGODB_URI) console.warn('Auth disabled: MONGODB_URI is not configured.')
-  else try {
-    await mongoose.connect(process.env.MONGODB_URI)
-    console.log('Connected to MongoDB Atlas')
-  } catch (error) {
-    console.error(`MongoDB connection failed; auth is unavailable: ${error.message}`)
+  const connected = await connectMongo()
+  if (connected) {
+    try {
+      await seedMongo()
+      console.log('Connected to MongoDB Atlas; marketplace collections are ready')
+    } catch (error) {
+      mongoState.status = 'error'
+      mongoState.error = error.message
+      console.error(`MongoDB seed failed; using JSON marketplace fallback: ${error.message}`)
+    }
+  } else if (mongoState.status === 'disabled') {
+    console.warn('MongoDB is not configured; using JSON marketplace fallback and auth is disabled.')
+  } else {
+    console.error(`MongoDB connection failed; using JSON marketplace fallback and auth is disabled: ${mongoState.error}`)
   }
 })
