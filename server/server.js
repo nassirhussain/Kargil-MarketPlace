@@ -43,8 +43,7 @@ app.use('/api/auth', auth)
 app.get('/api/me', requireAuth, (req, res) => res.json({ user: req.user }))
 app.get('/', (req, res) => res.json({ service: 'Kargil Marketplace API', health: '/api/health' }))
 app.use((err, req, res, next) => { console.error(err); res.status(500).json({ error: 'Unable to read marketplace data' }) })
-app.listen(port, async () => {
-  console.log(`Kargil Marketplace API listening on http://localhost:${port}`)
+async function start() {
   const connected = await connectMongo()
   if (connected) {
     try {
@@ -60,4 +59,9 @@ app.listen(port, async () => {
   } else {
     console.error(`MongoDB connection failed; using JSON marketplace fallback and auth is disabled: ${mongoState.error}`)
   }
+  app.listen(port, () => console.log(`Kargil Marketplace API listening on http://localhost:${port}`))
+}
+start().catch(error => {
+  console.error(`Unable to start Kargil Marketplace API: ${error.message}`)
+  process.exitCode = 1
 })
