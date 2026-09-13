@@ -17,21 +17,35 @@ router.post('/signup', unavailable, async (req, res, next) => {
     const { email, password, name, phone, college, area, location } = req.body
     if (!password || !name || (!email && !phone)) return res.status(400).json({ error: 'Name, password, and email or phone are required' })
     if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' })
-    if (email && await User.findOne({ email: email.toLowerCase() })) return res.status(409).json({ error: 'Email is already registered' })
-    const user = await User.create({ email, password: await bcrypt.hash(password, 12), name, phone, college, area, location })
+    const normalizedEmail = email?.trim().toLowerCase() || undefined
+    if (normalizedEmail && await User.findOne({ email: normalizedEmail })) return res.status(409).json({ error: 'Email is already registered' })
+    if (phone && await User.findOne({ phone: phone.trim() })) return res.status(409).json({ error: 'Phone number is already registered' })
+    const user = await User.create({ email: normalizedEmail, password: await bcrypt.hash(password, 12), name, phone: phone?.trim(), college, area, location })
     res.status(201).json({ token: tokenFor(user), user: publicUser(user) })
   } catch (error) { next(error) }
 })
 
 router.post('/login', unavailable, async (req, res, next) => {
   try {
-    const { email, password } = req.body
-    const user = await User.findOne({ email: email?.toLowerCase() }).select('+password')
+    const { email, phone, password } = req.body
+    const identifier = (email || phone || '').trim()
+    const query = identifier.includes('@') ? { email: identifier.toLowerCase() } : { phone: identifier }
+    const user = await User.findOne(query).select('+password')
     if (!user || !user.password || !(await bcrypt.compare(password || '', user.password))) return res.status(401).json({ error: 'Invalid email or password' })
     res.json({ token: tokenFor(user), user: publicUser(user) })
   } catch (error) { next(error) }
 })
 router.get('/me', requireAuth, (req, res) => res.json({ user: publicUser(req.user) }))
+router.put('/me', requireAuth, async (req, res, next) => {
+  try {
+    const { name, phone, college, area, location } = req.body
+    if (!name?.trim()) return res.status(400).json({ error: 'Name is required' })
+    const user = await User.findByIdAndUpdate(req.user.id, {
+      $set: { name: name.trim(), phone: phone?.trim(), college: college?.trim(), area: area?.trim(), location: location?.trim() }
+    }, { new: true, runValidators: true })
+    res.json({ user: publicUser(user) })
+  } catch (error) { next(error) }
+})
 
 router.get('/google', unavailable, (req, res, next) => {
   if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) return res.status(503).json({ error: 'Google OAuth is not configured' })
