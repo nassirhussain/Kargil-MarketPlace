@@ -5,7 +5,7 @@ import { Search, Heart, MessageCircle, ShoppingBag, Plus, Bell, Menu, X, Chevron
 import { AreaChart, Area, ResponsiveContainer, XAxis, Tooltip } from 'recharts'
 import './styles.css'
 
-const API_BASE = import.meta.env.VITE_API_BASE || '/api'
+const API_BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? '/api' : 'https://kargil-marketplace.onrender.com/api')
 const formatINR = value => `₹${Number(value || 0).toLocaleString('en-IN')}`
 async function readApiResponse(response) {
   const contentType = response.headers.get('content-type') || ''

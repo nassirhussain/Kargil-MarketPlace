@@ -47,8 +47,9 @@ router.put('/me', requireAuth, async (req, res, next) => {
   } catch (error) { next(error) }
 })
 
-router.get('/google', unavailable, (req, res, next) => {
+router.get('/google', (req, res, next) => {
   if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) return res.status(503).json({ error: 'Google OAuth is not configured' })
+  if (!configured()) return unavailable(req, res, next)
   passport.authenticate('google', { scope: ['profile', 'email'], session: false })(req, res, next)
 })
 
