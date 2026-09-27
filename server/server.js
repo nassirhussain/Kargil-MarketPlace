@@ -8,6 +8,7 @@ import shops from './routes/shops.js'
 import products from './routes/products.js'
 import hotels from './routes/hotels.js'
 import auth from './routes/auth.js'
+import messages from './routes/messages.js'
 import User from './models/User.js'
 import { requireAuth } from './middleware/auth.js'
 import { connectMongo, mongoState, seedMongo } from './lib/mongodb.js'
@@ -40,6 +41,7 @@ app.use('/api/shops', shops)
 app.use('/api/products', products)
 app.use('/api/hotels', hotels)
 app.use('/api/auth', auth)
+app.use('/api/messages', messages)
 app.get('/api/me', requireAuth, (req, res) => res.json({ user: req.user }))
 app.get('/', (req, res) => res.json({ service: 'Kargil Marketplace API', health: '/api/health' }))
 app.use((err, req, res, next) => { console.error(err); res.status(500).json({ error: 'Unable to read marketplace data' }) })
