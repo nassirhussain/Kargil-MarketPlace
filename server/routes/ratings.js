@@ -12,7 +12,12 @@ router.get('/:sellerId', async (req, res, next) => {
       { $match: { sellerId: req.params.sellerId } },
       { $group: { _id: '$sellerId', average: { $avg: '$stars' }, count: { $sum: 1 } } }
     ])
-    res.json({ average: summary?.average || 0, count: summary?.count || 0 })
+    const reviews = await Rating.find({ sellerId: req.params.sellerId })
+      .select('reviewerName stars comment productId createdAt')
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean()
+    res.json({ average: summary?.average || 0, count: summary?.count || 0, reviews })
   } catch (error) { next(error) }
 })
 
