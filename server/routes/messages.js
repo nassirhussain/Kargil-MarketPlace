@@ -21,7 +21,13 @@ router.get('/conversations', async (req, res, next) => {
     const conversations = await Conversation.find({
       $or: [{ buyerId: req.user.id }, { sellerId: req.user.id }]
     }).sort({ updatedAt: -1 }).lean()
-    res.json(conversations.map(stripMongo))
+    res.json(conversations.map(conversation => {
+      const lastReadAt = conversation.buyerId === req.user.id ? conversation.buyerLastReadAt : conversation.sellerLastReadAt
+      const unreadCount = conversation.messages.filter(message =>
+        message.senderId !== req.user.id && (!lastReadAt || new Date(message.createdAt) > new Date(lastReadAt))
+      ).length
+      return { ...stripMongo(conversation), unreadCount }
+    }))
   } catch (error) { next(error) }
 })
 
@@ -61,9 +67,19 @@ router.post('/conversations', async (req, res, next) => {
 
 router.get('/conversations/:id', async (req, res, next) => {
   try {
-    const conversation = await Conversation.findOne({ id: req.params.id }).lean()
+    const conversation = await Conversation.findOne({ id: req.params.id })
     if (!conversation || ![conversation.buyerId, conversation.sellerId].includes(req.user.id)) {
       return res.status(404).json({ error: 'Conversation not found' })
+    }
+    const isBuyer = conversation.buyerId === req.user.id
+    const lastReadAt = isBuyer ? conversation.buyerLastReadAt : conversation.sellerLastReadAt
+    const hasUnread = conversation.messages.some(message =>
+      message.senderId !== req.user.id && (!lastReadAt || message.createdAt > lastReadAt)
+    )
+    if (hasUnread) {
+      if (isBuyer) conversation.buyerLastReadAt = new Date()
+      else conversation.sellerLastReadAt = new Date()
+      await conversation.save()
     }
     res.json(stripMongo(conversation))
   } catch (error) { next(error) }
