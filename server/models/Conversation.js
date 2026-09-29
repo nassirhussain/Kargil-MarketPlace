@@ -16,8 +16,10 @@ const conversationSchema = new mongoose.Schema({
   productImage: String,
   buyerId: { type: String, required: true },
   buyerName: { type: String, required: true },
+  buyerLastReadAt: Date,
   sellerId: { type: String, required: true },
   sellerName: { type: String, required: true },
+  sellerLastReadAt: Date,
   messages: { type: [messageSchema], default: [] }
 }, { timestamps: true })
 

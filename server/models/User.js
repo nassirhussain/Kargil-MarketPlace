@@ -10,6 +10,9 @@ const userSchema = new mongoose.Schema({
   area: String,
   location: String,
   avatar: String,
+  emailVerified: { type: Boolean, default: false },
+  phoneVerified: { type: Boolean, default: false },
+  blocked: { type: Boolean, default: false },
   role: { type: String, enum: ['user', 'admin'], default: 'user' }
 }, { timestamps: true })
 

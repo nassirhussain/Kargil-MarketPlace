@@ -8,6 +8,6 @@ const productSchema = new mongoose.Schema({
   price: mongoose.Schema.Types.Mixed,
   unit: String,
   description: String
-}, { strict: false, timestamps: false })
+}, { strict: false, timestamps: true })
 
 export default mongoose.models.Product || mongoose.model('Product', productSchema)
