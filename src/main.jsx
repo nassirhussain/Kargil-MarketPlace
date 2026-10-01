@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Link, NavLink, useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
 import { Search, Heart, MessageCircle, ShoppingBag, Plus, Bell, Menu, X, ChevronRight, MapPin, Star, ArrowRight, BookOpen, Bike, Laptop, Armchair, Shirt, SlidersHorizontal, Sparkles, Package, TrendingUp, CheckCircle2, Clock, Send, UserRound, BarChart3, LogOut, Smartphone, CarFront, Dumbbell, CookingPot, BriefcaseBusiness, House, Wrench, Repeat2, Share2, Flag, LocateFixed, BadgeCheck, ShieldAlert, Phone, Navigation } from 'lucide-react'
@@ -884,33 +884,58 @@ function Messages({user}) {
   const [error,setError]=useState('')
   const [busy,setBusy]=useState(false)
   const [reportedMessage,setReportedMessage]=useState(null)
+  const [rating,setRating]=useState(0)
+  const [review,setReview]=useState('')
+  const [ratingMessage,setRatingMessage]=useState('')
+  const [loading,setLoading]=useState(true)
   const selectedId=searchParams.get('conversation')
+  const requestVersion=useRef(0)
+  const messagesEndRef=useRef(null)
   const token=localStorage.getItem('campuskart-token')
   const loadConversations=async()=> {
     if(!user||!token) return
+    const requestId=++requestVersion.current
     const response=await fetch(`${API_BASE}/messages/conversations`,{headers:{Authorization:`Bearer ${token}`}})
     const data=await readApiResponse(response)
+    if(requestId!==requestVersion.current)return
     setConversations(data)
     const target=data.find(conversation=>conversation.id===selectedId)||data[0]
-    if(target&&!selectedId) setSearchParams({conversation:target.id})
+    if(target&&target.id!==selectedId) setSearchParams({conversation:target.id},{replace:true})
     if(target) {
       const detailsResponse=await fetch(`${API_BASE}/messages/conversations/${target.id}`,{headers:{Authorization:`Bearer ${token}`}})
-      setActive(await readApiResponse(detailsResponse))
+      const details=await readApiResponse(detailsResponse)
+      if(requestId!==requestVersion.current)return
+      setActive(current=>{
+        if(current?.id!==details.id)return details
+        const messages=new Map(details.messages.map(message=>[message.id,message]))
+        current.messages.forEach(message=>{if(!messages.has(message.id))messages.set(message.id,message)})
+        return {...details,messages:[...messages.values()].sort((first,second)=>new Date(first.createdAt)-new Date(second.createdAt))}
+      })
       setConversations(current=>current.map(conversation=>conversation.id===target.id?{...conversation,unreadCount:0}:conversation))
     } else setActive(null)
+    setLoading(false)
   }
-  useEffect(()=>{loadConversations().catch(err=>setError(err.message))},[user?.id,selectedId])
+  useEffect(()=>{
+    loadConversations().catch(err=>{setError(err.message);setLoading(false)})
+    return ()=>{requestVersion.current+=1}
+  },[user?.id,selectedId])
   useEffect(()=>{
     if(!user) return
-    const interval=setInterval(()=>loadConversations().catch(err=>setError(err.message)),8000)
+    const interval=setInterval(()=>loadConversations().catch(err=>{setError(err.message);setLoading(false)}),5000)
     return ()=>clearInterval(interval)
   },[user?.id,selectedId])
+  useEffect(()=>{messagesEndRef.current?.scrollIntoView({behavior:'smooth',block:'end'})},[active?.id,active?.messages.length])
   const selectConversation=async conversation=>{
+    const requestId=++requestVersion.current
     setSearchParams({conversation:conversation.id})
+    setActive(null)
+    setLoading(true)
     try {
       const response=await fetch(`${API_BASE}/messages/conversations/${conversation.id}`,{headers:{Authorization:`Bearer ${token}`}})
-      setActive(await readApiResponse(response));setConversations(current=>current.map(item=>item.id===conversation.id?{...item,unreadCount:0}:item));setError('')
-    } catch(err) { setError(err.message) }
+      const details=await readApiResponse(response)
+      if(requestId!==requestVersion.current)return
+      setActive(details);setConversations(current=>current.map(item=>item.id===conversation.id?{...item,unreadCount:0}:item));setError('');setLoading(false)
+    } catch(err) { if(requestId===requestVersion.current){setError(err.message);setLoading(false)} }
   }
   const send=async event=>{
     event.preventDefault()
@@ -919,8 +944,13 @@ function Messages({user}) {
     try {
       const response=await fetch(`${API_BASE}/messages/conversations/${active.id}/messages`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},body:JSON.stringify({text,offerAmount:offer?Number(offer):undefined})})
       const updated=await readApiResponse(response)
-      setActive(updated);setText('');setOffer('')
-      setConversations(current=>[updated,...current.filter(conversation=>conversation.id!==updated.id)])
+      setActive(current=>{
+        if(current?.id!==updated.id)return updated
+        const messages=new Map(current.messages.map(message=>[message.id,message]))
+        updated.messages.forEach(message=>messages.set(message.id,{...messages.get(message.id),...message}))
+        return {...updated,messages:[...messages.values()].sort((first,second)=>new Date(first.createdAt)-new Date(second.createdAt))}
+      });setText('');setOffer('')
+      setConversations(current=>[...current.filter(conversation=>conversation.id!==updated.id),{...updated,lastMessagePreview:updated.messages.at(-1)?.text||'',lastMessageAt:updated.messages.at(-1)?.createdAt||updated.updatedAt,unreadCount:0}].sort((first,second)=>new Date(second.lastMessageAt||second.updatedAt)-new Date(first.lastMessageAt||first.updatedAt)))
     } catch(err) { setError(err.message) } finally { setBusy(false) }
   }
   const submitRating=async event=>{
@@ -934,7 +964,7 @@ function Messages({user}) {
       setReview('')
     } catch(err) { setError(err.message) } finally { setBusy(false) }
   }
-  if(!user) return <div className="mx-auto max-w-2xl px-5 py-20 text-center"><h1 className="text-3xl font-black">Log in to see your messages</h1><Link to="/login" className="mt-5 inline-block rounded-xl bg-teal px-5 py-3 font-bold text-white">Log in</Link></div>
+  if(!user||!token) return <div className="mx-auto max-w-2xl px-5 py-20 text-center"><h1 className="text-3xl font-black">Log in to see your messages</h1><Link to="/login" className="mt-5 inline-block rounded-xl bg-teal px-5 py-3 font-bold text-white">Log in</Link></div>
   const otherName=active?(active.buyerId===user.id?active.sellerName:active.buyerName):''
   const unreadTotal=conversations.reduce((sum,conversation)=>sum+(conversation.unreadCount||0),0)
   return <div className="mx-auto max-w-6xl px-4 py-8 sm:px-5 lg:px-8">
@@ -952,7 +982,7 @@ function Messages({user}) {
             <span className="mt-1 block truncate text-xs text-ink/45">{conversation.lastMessagePreview||conversation.messages.at(-1)?.text||'Start a conversation'}</span>
           </button>
         })}
-        {!conversations.length&&<p className="p-4 text-sm text-ink/50">Booking requests and seller replies will appear here.</p>}
+        {!conversations.length&&!loading&&<p className="p-4 text-sm text-ink/50">No conversations yet. Message a seller from a listing to start a chat.</p>}
       </aside>
       <section className="flex min-h-[500px] flex-col">
         {active?<><header className="border-b p-4"><b>{otherName}</b><p className="mt-1 text-xs text-ink/50">{active.productTitle} · Asking {formatINR(active.productPrice)}</p></header>
@@ -963,10 +993,10 @@ function Messages({user}) {
               {message.offerAmount&&<p className="mt-2 rounded-lg bg-white/15 px-3 py-2 font-bold">Offer: {formatINR(message.offerAmount)}</p>}
               {!own&&<button type="button" onClick={()=>setReportedMessage({...message,messageIndex:index})} className="mt-2 text-xs font-semibold underline opacity-75">Report message</button>}
             </div>
-          })}</div>
+          })}<div ref={messagesEndRef}/></div>
           {active.buyerId===user.id&&<form onSubmit={submitRating} className="border-t bg-cream/60 p-4"><p className="text-sm font-bold">Rate {active.sellerName}</p><div className="mt-2 flex gap-1" role="radiogroup" aria-label="Seller rating">{[1,2,3,4,5].map(value=><button key={value} type="button" onClick={()=>setRating(value)} aria-label={`${value} stars`} aria-pressed={rating===value}><Star size={22} className={value<=rating?'text-amber-400':'text-ink/20'} fill={value<=rating?'currentColor':'none'}/></button>)}</div><textarea value={review} onChange={event=>setReview(event.target.value)} maxLength={500} className="mt-2 w-full rounded-xl bg-white p-3 text-sm" placeholder="Optional review (up to 500 characters)"/><button disabled={!rating||busy} className="mt-2 rounded-xl bg-teal px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{busy?'Saving…':'Submit rating'}</button>{ratingMessage&&<p className="mt-2 text-sm font-semibold text-teal">{ratingMessage}</p>}</form>}
           <form onSubmit={send} className="grid gap-2 border-t p-4 sm:grid-cols-[1fr_180px_auto]"><input value={text} onChange={event=>setText(event.target.value)} maxLength={2000} className="rounded-xl bg-cream px-4 py-3 outline-none" placeholder="Write a message..."/><input type="number" min="1" max={active.productPrice} value={offer} onChange={event=>setOffer(event.target.value)} className="rounded-xl bg-cream px-4 py-3 outline-none" placeholder="Offer amount (₹)"/><button disabled={busy||(!text.trim()&&!offer)} className="rounded-xl bg-teal px-5 py-3 font-bold text-white disabled:opacity-50">{busy?'Sending…':'Send'}</button></form>
-        </>:<div className="grid flex-1 place-items-center p-8 text-center text-ink/50">{conversations.length?'Choose a conversation to view messages.':'When you book/message a listing, the conversation will appear here.'}</div>}
+        </>:<div className="grid flex-1 place-items-center p-8 text-center text-ink/50">{loading?'Loading conversations…':conversations.length?'Choose a conversation to view messages.':'Your conversations with buyers and sellers will appear here.'}</div>}
       </section>
     </div>
     {reportedMessage&&active&&<ReportDialog targetType="message" targetId={`${active.id}:${reportedMessage.messageIndex}`} targetName={reportedMessage.text.slice(0,80)} user={user} onClose={()=>setReportedMessage(null)} onLogin={()=>{sessionStorage.setItem('campuskart-after-auth','/messages');nav('/login')}}/>}
