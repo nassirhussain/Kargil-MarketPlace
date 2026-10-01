@@ -1,3 +1,4 @@
+
 # Kargil Marketplace
 
 This project is for the Kargil region and focuses on a hyperlocal marketplace for Kargil and Ladakh. It combines a React + Vite frontend with an Express + MongoDB backend for real listings, user accounts, admin moderation, messaging, reports, and verification workflows.
