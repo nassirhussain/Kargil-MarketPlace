@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Link, NavLink, useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
-import { Search, Heart, MessageCircle, ShoppingBag, Plus, Bell, Menu, X, ChevronRight, MapPin, Star, ArrowRight, BookOpen, Bike, Laptop, Armchair, Shirt, SlidersHorizontal, Sparkles, Package, TrendingUp, CheckCircle2, Clock, Send, UserRound, BarChart3, LogOut, Smartphone, CarFront, Dumbbell, CookingPot, BriefcaseBusiness, House, Wrench, Repeat2, Share2, Flag, LocateFixed, BadgeCheck, ShieldAlert, Phone, Navigation } from 'lucide-react'
+import { Search, Heart, MessageCircle, ShoppingBag, Plus, Bell, Menu, X, ChevronRight, MapPin, Star, ArrowRight, BookOpen, Bike, Laptop, Armchair, Shirt, SlidersHorizontal, Sparkles, Package, TrendingUp, CheckCircle2, Clock, Send, UserRound, BarChart3, LogOut, Smartphone, CarFront, Dumbbell, CookingPot, BriefcaseBusiness, House, Wrench, Repeat2, Share2, Flag, LocateFixed, BadgeCheck, ShieldAlert, Phone, Navigation, Store } from 'lucide-react'
 import { AreaChart, Area, ResponsiveContainer, XAxis, Tooltip } from 'recharts'
 import './styles.css'
 
@@ -281,7 +281,7 @@ function App() {
     <Route path="/" element={<Home products={visibleProducts} favorites={favorites} toggleFavorite={toggleFavorite} selectedLocation={selectedLocation} setSelectedLocation={setSelectedLocation} coordinates={coordinates} setNearby={setNearby} categoryData={activeCategories} />} />
     <Route path="/browse" element={<Browse products={visibleProducts} favorites={favorites} toggleFavorite={toggleFavorite} selectedLocation={selectedLocation} setSelectedLocation={setSelectedLocation} coordinates={coordinates} setNearby={setNearby} categoryData={activeCategories} />} />
     <Route path="/marketplace" element={<Browse products={visibleProducts} favorites={favorites} toggleFavorite={toggleFavorite} selectedLocation={selectedLocation} setSelectedLocation={setSelectedLocation} coordinates={coordinates} setNearby={setNearby} categoryData={activeCategories} />} />
-    <Route path="/shops" element={<Shops />} />
+    <Route path="/shops" element={<Shops user={user} categoryData={activeCategories} />} />
     <Route path="/hotels" element={<Hotels />} />
     <Route path="/about" element={<About />} />
     <Route path="/product/:id" element={<Product products={visibleProducts} favorites={favorites} toggleFavorite={toggleFavorite} user={user} />} />
@@ -846,20 +846,107 @@ function AdminDashboard({products,setProducts,user,categoryData,setCategoryData}
   </div>
 }
 function Admin({products,setProducts}) { return <AdminDashboard products={products} setProducts={setProducts} user={null}/> }
-function Shops() {
-  const [shops, setShops] = useState([])
-  const [products, setProducts] = useState([])
-  const [error, setError] = useState('')
-  useEffect(() => {
-    Promise.all([fetch(`${API_BASE}/shops`).then(r => r.json()), fetch(`${API_BASE}/products`).then(r => r.json())])
-      .then(([shopData, productData]) => {
-        setShops(Array.isArray(shopData) ? shopData : [])
-        setProducts(Array.isArray(productData) ? productData : [])
-        setError('')
-      })
-      .catch(() => setError('Unable to load local shop listings right now. Please try again.'))
-  }, [])
-  return <div className="mx-auto max-w-7xl px-5 py-10 lg:px-8"><p className="text-sm font-bold uppercase tracking-widest text-teal">Around Kargil</p><h1 className="mt-2 text-4xl font-black">Local shops & goods</h1><p className="mt-2 max-w-2xl text-ink/55">Discover trusted Kargil businesses and the essentials they keep ready for you.</p>{error && <p role="alert" className="mt-5 rounded-xl bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</p>}<div className="mt-8 grid gap-5 md:grid-cols-2">{shops.map(shop => <article key={shop.id} className="rounded-2xl border border-ink/5 bg-white p-6 shadow-sm"><div className="flex items-start justify-between"><div><h2 className="text-xl font-black">{shop.name}</h2><p className="mt-1 flex items-center gap-1 text-sm text-ink/55"><MapPin size={14}/>{shop.location}</p><a href={`tel:${shop.contactNumber || ''}`} className="mt-2 inline-block text-sm font-bold text-teal">{shop.contactNumber || 'Contact number not added'}</a></div><span className="rounded-full bg-mint px-3 py-1 text-xs font-bold text-teal">{shop.category}</span></div><p className="mt-4 text-sm text-ink/65">{shop.description}</p><p className="mt-4 text-xs font-bold uppercase tracking-wider text-ink/40">Available goods</p><div className="mt-2 flex flex-wrap gap-2">{shop.productIds.map(id => { const product = products.find(p => String(p.id) === String(id)); return product && <span key={id} className="rounded-full bg-cream px-3 py-1.5 text-xs font-semibold">{product.title}</span> })}</div></article>)}</div>{!shops.length && !error && <p className="mt-10 rounded-2xl bg-white p-10 text-center text-ink/55">No local shop listings are available yet.</p>}</div>
+function Shops({user,categoryData=categories}) {
+  const [shops,setShops]=useState([])
+  const [loading,setLoading]=useState(true)
+  const [error,setError]=useState('')
+  const [notice,setNotice]=useState('')
+  const [busy,setBusy]=useState(false)
+  const [showShopForm,setShowShopForm]=useState(false)
+  const [shopForm,setShopForm]=useState({name:'',category:'General store',location:'Kargil',contactNumber:'',description:''})
+  const [itemShopId,setItemShopId]=useState('')
+  const [itemForm,setItemForm]=useState({title:'',price:'',category:'Local Products',description:'',image:'',quantity:'1'})
+  const token=localStorage.getItem('campuskart-token')
+  const authorization=()=>({Authorization:`Bearer ${token}`})
+  const loadShops=async()=>{
+    setLoading(true)
+    setError('')
+    try {
+      const response=await fetch(`${API_BASE}/shops`)
+      const data=await readApiResponse(response)
+      if(!Array.isArray(data))throw new Error('The local shop response is invalid.')
+      setShops(data)
+    }catch(err){setError(err.message||'Unable to load local shops. Please try again.')}
+    finally{setLoading(false)}
+  }
+  useEffect(()=>{loadShops()},[])
+  const addShop=async event=>{
+    event.preventDefault()
+    setError('');setNotice('')
+    if(!user||!token){setError('Log in to register and manage a local shop.');return}
+    setBusy(true)
+    try{
+      const response=await fetch(`${API_BASE}/shops`,{method:'POST',headers:{...authorization(),'Content-Type':'application/json'},body:JSON.stringify(shopForm)})
+      const created=await readApiResponse(response)
+      setShops(current=>[created,...current])
+      setShopForm({name:'',category:'General store',location:'Kargil',contactNumber:'',description:''})
+      setShowShopForm(false)
+      setNotice('Your shop is listed. Add available goods so customers can browse them.')
+    }catch(err){setError(err.message||'Could not add this shop. Please try again.')}
+    finally{setBusy(false)}
+  }
+  const addInventoryItem=async event=>{
+    event.preventDefault()
+    const shop=shops.find(item=>item.id===itemShopId)
+    if(!shop)return
+    if(!itemForm.image){setError('Add a photo for this shop item before publishing it.');return}
+    setBusy(true);setError('');setNotice('')
+    try{
+      const response=await fetch(`${API_BASE}/products`,{method:'POST',headers:{...authorization(),'Content-Type':'application/json'},body:JSON.stringify({
+        ...itemForm,price:Number(itemForm.price),quantity:Number(itemForm.quantity),condition:'New',
+        location:shop.location,contactPreference:shop.contactNumber?'call':'chat',
+        contactPhone:shop.contactNumber||'',shopId:shop.id
+      })})
+      const created=await readApiResponse(response)
+      setShops(current=>current.map(record=>record.id===shop.id?{...record,products:[created,...(record.products||[])]}:record))
+      setItemForm({title:'',price:'',category:'Local Products',description:'',image:'',quantity:'1'})
+      setItemShopId('')
+      setNotice(`${created.title} is now shown in ${shop.name}'s available goods.`)
+    }catch(err){setError(err.message||'Could not add this item. Please try again.')}
+    finally{setBusy(false)}
+  }
+  return <div className="mx-auto max-w-7xl px-4 py-8 sm:px-5 lg:px-8">
+    <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+      <div><p className="text-sm font-bold uppercase tracking-widest text-teal">Around Kargil</p><h1 className="mt-2 text-3xl font-black sm:text-4xl">Local shops & goods</h1><p className="mt-2 max-w-2xl text-ink/55">Browse what Kargil and Ladakh shops currently have available, or register your own shop and add its goods.</p></div>
+      <button type="button" onClick={()=>{setShowShopForm(value=>!value);setError('')}} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-teal px-4 py-3 text-sm font-bold text-white"><Store size={17}/>{showShopForm?'Close':'Add a local shop'}</button>
+    </div>
+    {error&&<p role="alert" className="mt-5 rounded-xl bg-red-50 p-4 text-sm font-semibold text-red-700">{error}{!user&&<Link to="/login" className="ml-2 underline">Log in</Link>}</p>}
+    {notice&&<p role="status" className="mt-5 rounded-xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">{notice}</p>}
+    {showShopForm&&<form onSubmit={addShop} className="mt-6 grid gap-3 rounded-2xl bg-white p-5 shadow-sm sm:grid-cols-2">
+      <h2 className="text-xl font-black sm:col-span-2">Register your shop</h2>
+      <input required maxLength="120" value={shopForm.name} onChange={event=>setShopForm(current=>({...current,name:event.target.value}))} placeholder="Shop name"/>
+      <input required maxLength="80" value={shopForm.category} onChange={event=>setShopForm(current=>({...current,category:event.target.value}))} placeholder="Shop type (e.g. Grocery, Clothing)"/>
+      <select required value={shopForm.location} onChange={event=>setShopForm(current=>({...current,location:event.target.value}))} aria-label="Shop location">{locations.slice(0,-1).map(location=><option key={location}>{location}</option>)}<option value="Other Ladakh locations">Other Ladakh locations</option></select>
+      <input type="tel" maxLength="30" value={shopForm.contactNumber} onChange={event=>setShopForm(current=>({...current,contactNumber:event.target.value}))} placeholder="Shop phone (optional)"/>
+      <textarea required maxLength="1000" value={shopForm.description} onChange={event=>setShopForm(current=>({...current,description:event.target.value}))} className="sm:col-span-2" placeholder="Describe your shop and what you sell"/>
+      <button disabled={busy||!user} className="min-h-11 rounded-xl bg-teal px-4 py-3 font-bold text-white disabled:opacity-50 sm:col-span-2">{busy?'Adding shop…':'Add shop'}</button>
+      {!user&&<p className="text-sm text-ink/55 sm:col-span-2">You need to log in before registering a shop. Shop changes are saved to the marketplace database.</p>}
+    </form>}
+    {loading?<div className="mt-8 grid gap-5 md:grid-cols-2">{[1,2].map(item=><div key={item} className="skeleton h-64 rounded-2xl bg-white"/> )}</div>
+    :shops.length?<div className="mt-8 grid gap-5 lg:grid-cols-2">{shops.map(shop=>{
+      const products=shop.products||[]
+      const manages=Boolean(user&&shop.ownerId===user.id)
+      return <article key={shop.id} className="rounded-2xl border border-ink/5 bg-white p-5 shadow-sm sm:p-6">
+        <div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="text-xl font-black">{shop.name}</h2><p className="mt-1 flex items-center gap-1 text-sm text-ink/55"><MapPin size={14}/>{shop.location}</p>{shop.contactNumber&&<a href={`tel:${shop.contactNumber}`} className="mt-2 inline-block text-sm font-bold text-teal">{shop.contactNumber}</a>}</div><span className="shrink-0 rounded-full bg-mint px-3 py-1 text-xs font-bold text-teal">{shop.category}</span></div>
+        <p className="mt-4 text-sm text-ink/65">{shop.description}</p>
+        <div className="mt-5 flex items-center justify-between border-t pt-4"><h3 className="font-bold">Available goods <span className="text-sm font-medium text-ink/45">({products.length})</span></h3>{manages&&<button type="button" onClick={()=>{setItemShopId(current=>current===shop.id?'':shop.id);setError('')}} className="inline-flex items-center gap-1 rounded-lg border border-teal/20 px-3 py-2 text-xs font-bold text-teal"><Plus size={14}/>Add goods</button>}</div>
+        {manages&&itemShopId===shop.id&&<form onSubmit={addInventoryItem} className="mt-3 grid gap-2 rounded-xl bg-cream p-3 sm:grid-cols-2">
+          <input required maxLength="100" value={itemForm.title} onChange={event=>setItemForm(current=>({...current,title:event.target.value}))} placeholder="Item name"/>
+          <input required type="number" min="1" value={itemForm.price} onChange={event=>setItemForm(current=>({...current,price:event.target.value}))} placeholder="Price (₹)"/>
+          <select value={itemForm.category} onChange={event=>setItemForm(current=>({...current,category:event.target.value}))}>{categoryData.map(category=><option key={category.name}>{category.name}</option>)}</select>
+          <input required type="number" min="1" max="10000" value={itemForm.quantity} onChange={event=>setItemForm(current=>({...current,quantity:event.target.value}))} placeholder="Quantity"/>
+          <label className="text-xs font-semibold text-ink/60 sm:col-span-2">Product photo
+            <input type="file" accept="image/*" onChange={async event=>{const file=event.target.files?.[0];if(!file)return;try{const image=await compressImage(file);setItemForm(current=>({...current,image}));setError('')}catch(err){setError(err.message)}}} className="mt-1 w-full rounded-lg border border-ink/10 bg-white p-2 text-sm"/>
+          </label>
+          {itemForm.image&&<img src={itemForm.image} alt="Product preview" className="aspect-[3/1] max-h-40 rounded-lg bg-white object-contain sm:col-span-2"/>}
+          <textarea required maxLength="2000" value={itemForm.description} onChange={event=>setItemForm(current=>({...current,description:event.target.value}))} placeholder="Describe this item" className="sm:col-span-2"/>
+          <button disabled={busy} className="min-h-10 rounded-lg bg-teal px-3 py-2 text-sm font-bold text-white disabled:opacity-50 sm:col-span-2">{busy?'Adding item…':'Publish available good'}</button>
+        </form>}
+        {products.length?<div className="mt-3 grid gap-3 sm:grid-cols-2">{products.map(product=><Link key={product.id} to={`/product/${product.id}`} className="flex min-w-0 gap-3 rounded-xl bg-cream p-3 transition hover:shadow-sm"><img loading="lazy" src={product.images?.[0]||product.image} alt="" className="h-16 w-16 shrink-0 rounded-lg bg-white object-cover"/><span className="min-w-0"><b className="block truncate text-sm">{product.title}</b><span className="mt-1 block text-sm font-black text-teal">{formatINR(product.price)}</span><span className="mt-1 block truncate text-xs text-ink/50">{product.category}{Number.isFinite(Number(product.quantity))?` · ${product.quantity} available`:''}</span></span></Link>)}</div>:<p className="mt-3 rounded-xl bg-cream p-4 text-sm text-ink/55">This shop has not added available goods yet.</p>}
+      </article>
+    })}</div>
+    :<div className="mt-8 rounded-2xl bg-white px-5 py-14 text-center shadow-sm"><Store className="mx-auto text-teal/40" size={42}/><h2 className="mt-3 text-xl font-black">No local shops listed yet</h2><p className="mt-2 text-sm text-ink/55">Register a shop to help people see what is available locally.</p><button type="button" onClick={()=>setShowShopForm(true)} className="mt-5 rounded-xl bg-teal px-5 py-3 text-sm font-bold text-white">Add the first shop</button></div>}
+  </div>
 }
 function Hotels() {
   const [hotels, setHotels] = useState([])

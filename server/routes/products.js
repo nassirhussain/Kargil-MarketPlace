@@ -5,6 +5,7 @@ import { isMongoReady, stripMongo } from '../lib/mongodb.js'
 import { requireAuth } from '../middleware/auth.js'
 import Category from '../models/Category.js'
 import User from '../models/User.js'
+import Shop from '../models/Shop.js'
 import mongoose from 'mongoose'
 const router = Router()
 const validImage = image => typeof image === 'string' && image.length <= 5 * 1024 * 1024 &&
@@ -68,6 +69,16 @@ router.post('/', requireAuth, async (req, res, next) => { try {
   if (!req.body.image && !req.body.images?.length) return res.status(400).json({ error: 'Upload at least one product photo' })
   if (!['New', 'Used'].includes(condition)) return res.status(400).json({ error: 'Condition must be New or Used' })
   if (isMongoReady() && !await Category.exists({ name: category.trim(), active: true })) return res.status(400).json({ error: 'Choose an active marketplace category' })
+  let shop
+  const quantity = req.body.quantity === undefined ? undefined : Number(req.body.quantity)
+  if (quantity !== undefined && (!Number.isInteger(quantity) || quantity < 1 || quantity > 10000)) return res.status(400).json({ error: 'Quantity must be a whole number between 1 and 10,000' })
+  if (req.body.shopId !== undefined) {
+    if (typeof req.body.shopId !== 'string' || !req.body.shopId.trim()) return res.status(400).json({ error: 'Choose a valid local shop' })
+    if (!isMongoReady()) return res.status(503).json({ error: 'Shop inventory requires the marketplace database.' })
+    shop = isMongoReady() ? await Shop.findOne({ id: req.body.shopId.trim() }) : null
+    if (!shop) return res.status(404).json({ error: 'Local shop not found' })
+    if (shop.ownerId !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'Only the shop manager can add its inventory' })
+  }
   if (req.body.contactPreference !== undefined && !['chat', 'call', 'whatsapp'].includes(req.body.contactPreference)) return res.status(400).json({ error: 'Choose chat, call, or WhatsApp as your contact preference' })
   const contactPreference = req.body.contactPreference || 'chat'
   if (contactPreference !== 'chat' && (typeof req.body.contactPhone !== 'string' || !/^[+0-9 ()-]{7,20}$/.test(req.body.contactPhone.trim()))) return res.status(400).json({ error: 'Enter a valid contact number for phone or WhatsApp contact' })
@@ -80,7 +91,8 @@ router.post('/', requireAuth, async (req, res, next) => { try {
     ...req.body,
     ...(point ? { coordinates: { latitude: point.latitude, longitude: point.longitude } } : {}),
     category: category.trim(),
-    location: location.trim(),
+    location: shop?.location || location.trim(),
+    ...(quantity !== undefined ? { quantity } : {}),
     id: `product-${Date.now()}`,
     title: title.trim(),
     description: description.trim(),
@@ -90,6 +102,7 @@ router.post('/', requireAuth, async (req, res, next) => { try {
     contactPhone: contactPreference === 'chat' ? '' : req.body.contactPhone.trim(),
     sellerId: req.user.id,
     seller: req.user.name,
+    ...(shop ? { shopId: shop.id } : {}),
     sellerVerified: Boolean(req.user.emailVerified || req.user.phoneVerified),
     featured: false,
     createdAt: new Date(),
