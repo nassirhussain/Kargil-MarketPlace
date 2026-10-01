@@ -55,11 +55,27 @@ async function seedModel(Model, records) {
 
 export async function seedMongo() {
   if (!isMongoReady()) return
+
+  const shouldSeed = process.env.SEED_MONGO === 'true' || process.env.NODE_ENV !== 'production'
+  const { defaultCategories } = await import('./defaultCategories.js')
+  const [{ default: Category }, { default: Product }] = await Promise.all([
+    import('../models/Category.js'),
+    import('../models/Product.js')
+  ])
+
+  await Promise.all(defaultCategories.map(category => Category.updateOne({ slug: category.slug }, { $setOnInsert: category }, { upsert: true })))
+
+  if (!shouldSeed) {
+    return
+  }
+
   const dataPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data.json')
   const data = JSON.parse(await fs.readFile(dataPath, 'utf8'))
-  const [{ default: Shop }, { default: Product }, { default: Hotel }] = await Promise.all([
-    import('../models/Shop.js'), import('../models/Product.js'), import('../models/Hotel.js')
+  const [{ default: Shop }, { default: Hotel }] = await Promise.all([
+    import('../models/Shop.js'),
+    import('../models/Hotel.js')
   ])
+
   await Promise.all([
     seedModel(Shop, data.shops || []),
     seedModel(Product, data.products || []),
