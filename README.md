@@ -1,6 +1,24 @@
 # Kargil Marketplace
 
-A hyperlocal marketplace for people in Kargil and Ladakh. The existing React/Vite application talks to an Express API backed by MongoDB; authentication and account-scoped actions require MongoDB.
+This project is for the Kargil region and focuses on a hyperlocal marketplace for Kargil and Ladakh. It combines a React + Vite frontend with an Express + MongoDB backend for real listings, user accounts, admin moderation, messaging, reports, and verification workflows.
+
+## Project overview
+
+Kargil Marketplace is a local buying and selling platform designed for the Kargil/Ladakh community. It supports:
+
+- listing products and services
+- browsing and filtering items by location or category
+- contact flows for sellers
+- wishlist, follow, block, and report actions
+- chat and unread messaging
+- admin moderation and category management
+- OTP-based verification workflows for email and phone
+
+## Tech stack
+
+- Frontend: React, Vite, React Router, Tailwind CSS, Lucide React, Recharts
+- Backend: Express, Mongoose, JWT, MongoDB
+- Optional providers: Resend for email OTP, Twilio Verify for SMS OTP
 
 ## Requirements
 
@@ -13,7 +31,7 @@ A hyperlocal marketplace for people in Kargil and Ladakh. The existing React/Vit
 
 1. Install frontend dependencies from the project root with `npm install`.
 2. Install backend dependencies with `cd server; npm install`.
-3. Copy `.env.example` to `server/.env` and configure `MONGODB_URI`, a long random `JWT_SECRET`, and `FRONTEND_URL=http://localhost:5173`. Keep the copied file private and untracked.
+3. Copy `.env.example` to `server/.env` and configure your environment values. Keep the file private and untracked.
 4. Start the API from `server` with `npm run dev`.
 5. In a second terminal, start Vite from the project root with `npm run dev`.
 
@@ -90,3 +108,7 @@ npm test          # Offline Node.js unit tests
 8. Deploy API and frontend, then verify `/api/health`, login, listings, and provider delivery against the deployed environment.
 
 Render Blueprint services have auto-deploy enabled. A local build does not itself deploy changes; verify the Render deployment and public site after a Git push.
+
+## Important note
+
+This project is specifically designed for Kargil and nearby Ladakh communities. The marketplace should feel local and trustworthy, with real data and honest error states rather than demo-only placeholder content.
