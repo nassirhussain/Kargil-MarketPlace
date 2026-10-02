@@ -6,6 +6,7 @@ const productSchema = new mongoose.Schema({
   title: String,
   category: String,
   price: mongoose.Schema.Types.Mixed,
+  quantity: { type: Number, min: 1 },
   unit: String,
   description: String
 }, { strict: false, timestamps: true })

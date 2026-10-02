@@ -7,7 +7,8 @@ const shopSchema = new mongoose.Schema({
   location: String,
   contactNumber: String,
   description: String,
+  ownerId: { type: String, index: true },
   productIds: [String]
-}, { strict: false, timestamps: false })
+}, { strict: false, timestamps: true })
 
 export default mongoose.models.Shop || mongoose.model('Shop', shopSchema)

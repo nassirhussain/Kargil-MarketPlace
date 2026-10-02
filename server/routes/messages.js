@@ -9,7 +9,8 @@ import { rateLimit } from '../middleware/rateLimit.js'
 
 const router = Router()
 router.use(requireAuth)
-router.use(rateLimit({ limit: 40, windowMs: 10 * 60_000, keyPrefix: 'messages' }))
+const readRateLimit = rateLimit({ limit: 360, windowMs: 10 * 60_000, keyPrefix: 'message-reads' })
+const sendRateLimit = rateLimit({ limit: 60, windowMs: 10 * 60_000, keyPrefix: 'message-sends' })
 const accountsBlocked = async (firstId, secondId) => Boolean(await Block.exists({
   $or: [{ blockerId: firstId, blockedId: secondId }, { blockerId: secondId, blockedId: firstId }]
 }))
@@ -23,7 +24,7 @@ function parseMessage(body) {
   return { text: text || 'I would like to offer this amount.', offerAmount }
 }
 
-router.get('/conversations', async (req, res, next) => {
+router.get('/conversations', readRateLimit, async (req, res, next) => {
   try {
     const conversations = await Conversation.find({
       $or: [{ buyerId: req.user.id }, { sellerId: req.user.id }]
@@ -45,7 +46,7 @@ router.get('/conversations', async (req, res, next) => {
   } catch (error) { next(error) }
 })
 
-router.post('/conversations', async (req, res, next) => {
+router.post('/conversations', sendRateLimit, async (req, res, next) => {
   try {
     if (typeof req.body.productId !== 'string' || !req.body.productId.trim() || req.body.productId.length > 100) {
       return res.status(400).json({ error: 'Choose a valid listing to start this conversation' })
@@ -84,7 +85,7 @@ router.post('/conversations', async (req, res, next) => {
   } catch (error) { next(error) }
 })
 
-router.get('/conversations/:id', async (req, res, next) => {
+router.get('/conversations/:id', readRateLimit, async (req, res, next) => {
   try {
     const conversation = await Conversation.findOne({ id: req.params.id })
     if (!conversation || ![conversation.buyerId, conversation.sellerId].includes(req.user.id)) {
@@ -119,7 +120,7 @@ router.get('/conversations/:id', async (req, res, next) => {
   } catch (error) { next(error) }
 })
 
-router.post('/conversations/:id/messages', async (req, res, next) => {
+router.post('/conversations/:id/messages', sendRateLimit, async (req, res, next) => {
   try {
     const parsed = parseMessage(req.body)
     if (parsed.error) return res.status(400).json({ error: parsed.error })

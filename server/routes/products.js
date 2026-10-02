@@ -1,10 +1,10 @@
 import { Router } from 'express'
-import { readStore, writeStore } from '../lib/store.js'
 import Product from '../models/Product.js'
 import { isMongoReady, stripMongo } from '../lib/mongodb.js'
 import { requireAuth } from '../middleware/auth.js'
 import Category from '../models/Category.js'
 import User from '../models/User.js'
+import Shop from '../models/Shop.js'
 import mongoose from 'mongoose'
 const router = Router()
 const validImage = image => typeof image === 'string' && image.length <= 5 * 1024 * 1024 &&
@@ -27,8 +27,8 @@ const publicProduct = product => {
 router.get('/moderation/all', requireAuth, async (req, res, next) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' })
-    const products = isMongoReady() ? (await Product.find().lean()).map(stripMongo) : (await readStore()).products
-    res.json(products)
+    if (!isMongoReady()) return res.status(503).json({ error: 'Listing moderation requires the marketplace database.' })
+    res.json((await Product.find().lean()).map(stripMongo))
   } catch (error) { next(error) }
 })
 router.get('/', async (req, res, next) => {
@@ -36,27 +36,21 @@ router.get('/', async (req, res, next) => {
     const filter = { status: { $ne: 'Rejected' } }
     if (req.query.shopId) filter.shopId = req.query.shopId
     if (req.query.sellerId) filter.sellerId = req.query.sellerId
-    if (isMongoReady()) {
-      const suspendedSellerIds = (await User.find({ $or: [{ blocked: true }, { status: { $in: ['suspended', 'banned'] } }] }).distinct('_id')).map(String)
-      filter.sellerId = { ...(filter.sellerId ? { $eq: filter.sellerId } : {}), $nin: suspendedSellerIds }
-      return res.json((await Product.find(filter).lean()).map(publicProduct))
-    }
-    const products = (await readStore()).products
-      .filter(product => product.status !== 'Rejected' && (!req.query.shopId || product.shopId === req.query.shopId) && (!req.query.sellerId || product.sellerId === req.query.sellerId))
-      .map(publicProduct)
-    res.json(products)
+    if (!isMongoReady()) return res.status(503).json({ error: 'Listings are unavailable until the marketplace database is connected.' })
+    const suspendedSellerIds = (await User.find({ $or: [{ blocked: true }, { status: { $in: ['suspended', 'banned'] } }] }).distinct('_id')).map(String)
+    filter.sellerId = { ...(filter.sellerId ? { $eq: filter.sellerId } : {}), $nin: suspendedSellerIds }
+    res.json((await Product.find(filter).lean()).map(publicProduct))
   } catch (error) { next(error) }
 })
 router.get('/:id', async (req, res, next) => {
   try {
     let product
-    if (isMongoReady()) {
-      const found = await Product.findOne({ id: req.params.id, status: { $ne: 'Rejected' } }).lean()
-      if (found?.sellerId && mongoose.isValidObjectId(found.sellerId)) {
-        const seller = await User.findById(found.sellerId).select('status blocked').lean()
-        if (!seller || (!seller.blocked && (!seller.status || seller.status === 'active'))) product = publicProduct(found)
-      } else product = publicProduct(found)
-    } else product = publicProduct((await readStore()).products.find(item => item.id === req.params.id && item.status !== 'Rejected'))
+    if (!isMongoReady()) return res.status(503).json({ error: 'Listings are unavailable until the marketplace database is connected.' })
+    const found = await Product.findOne({ id: req.params.id, status: { $ne: 'Rejected' } }).lean()
+    if (found?.sellerId && mongoose.isValidObjectId(found.sellerId)) {
+      const seller = await User.findById(found.sellerId).select('status blocked').lean()
+      if (!seller || (!seller.blocked && (!seller.status || seller.status === 'active'))) product = publicProduct(found)
+    } else product = publicProduct(found)
     return product ? res.json(product) : res.status(404).json({ error: 'Product not found' })
   } catch (error) { next(error) }
 })
@@ -68,6 +62,16 @@ router.post('/', requireAuth, async (req, res, next) => { try {
   if (!req.body.image && !req.body.images?.length) return res.status(400).json({ error: 'Upload at least one product photo' })
   if (!['New', 'Used'].includes(condition)) return res.status(400).json({ error: 'Condition must be New or Used' })
   if (isMongoReady() && !await Category.exists({ name: category.trim(), active: true })) return res.status(400).json({ error: 'Choose an active marketplace category' })
+  let shop
+  const quantity = req.body.quantity === undefined ? undefined : Number(req.body.quantity)
+  if (quantity !== undefined && (!Number.isInteger(quantity) || quantity < 1 || quantity > 10000)) return res.status(400).json({ error: 'Quantity must be a whole number between 1 and 10,000' })
+  if (req.body.shopId !== undefined) {
+    if (typeof req.body.shopId !== 'string' || !req.body.shopId.trim()) return res.status(400).json({ error: 'Choose a valid local shop' })
+    if (!isMongoReady()) return res.status(503).json({ error: 'Shop inventory requires the marketplace database.' })
+    shop = isMongoReady() ? await Shop.findOne({ id: req.body.shopId.trim() }) : null
+    if (!shop) return res.status(404).json({ error: 'Local shop not found' })
+    if (shop.ownerId !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'Only the shop manager can add its inventory' })
+  }
   if (req.body.contactPreference !== undefined && !['chat', 'call', 'whatsapp'].includes(req.body.contactPreference)) return res.status(400).json({ error: 'Choose chat, call, or WhatsApp as your contact preference' })
   const contactPreference = req.body.contactPreference || 'chat'
   if (contactPreference !== 'chat' && (typeof req.body.contactPhone !== 'string' || !/^[+0-9 ()-]{7,20}$/.test(req.body.contactPhone.trim()))) return res.status(400).json({ error: 'Enter a valid contact number for phone or WhatsApp contact' })
@@ -80,7 +84,8 @@ router.post('/', requireAuth, async (req, res, next) => { try {
     ...req.body,
     ...(point ? { coordinates: { latitude: point.latitude, longitude: point.longitude } } : {}),
     category: category.trim(),
-    location: location.trim(),
+    location: shop?.location || location.trim(),
+    ...(quantity !== undefined ? { quantity } : {}),
     id: `product-${Date.now()}`,
     title: title.trim(),
     description: description.trim(),
@@ -90,19 +95,21 @@ router.post('/', requireAuth, async (req, res, next) => { try {
     contactPhone: contactPreference === 'chat' ? '' : req.body.contactPhone.trim(),
     sellerId: req.user.id,
     seller: req.user.name,
+    ...(shop ? { shopId: shop.id } : {}),
     sellerVerified: Boolean(req.user.emailVerified || req.user.phoneVerified),
     featured: false,
     createdAt: new Date(),
     status: 'Active'
   }
-  if (isMongoReady()) await Product.create(product)
-  else { const data = await readStore(); data.products.push(product); await writeStore(data) }
+  if (!isMongoReady()) return res.status(503).json({ error: 'Publishing listings requires the marketplace database.' })
+  await Product.create(product)
   res.status(201).json(publicProduct(product))
 } catch (e) { next(e) } })
 router.put('/:id', requireAuth, async (req, res, next) => { try {
-  const product = isMongoReady() ? await Product.findOne({ id: req.params.id }) : null
-  if (isMongoReady() && !product) return res.status(404).json({ error: 'Product not found' })
-  if (isMongoReady() && product.sellerId !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'You can only update your own listings' })
+  if (!isMongoReady()) return res.status(503).json({ error: 'Updating listings requires the marketplace database.' })
+  const product = await Product.findOne({ id: req.params.id })
+  if (!product) return res.status(404).json({ error: 'Product not found' })
+  if (product.sellerId !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'You can only update your own listings' })
   if (req.body.status && !['Active', 'Sold', 'Rejected'].includes(req.body.status)) return res.status(400).json({ error: 'Invalid listing status' })
   if (req.body.status === 'Rejected' && req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required to reject listings' })
   if (req.body.featured !== undefined && (req.user.role !== 'admin' || typeof req.body.featured !== 'boolean')) return res.status(403).json({ error: 'Only admins can feature listings' })
@@ -129,7 +136,7 @@ router.put('/:id', requireAuth, async (req, res, next) => { try {
     }
     if (point) updated.coordinates = { latitude: point.latitude, longitude: point.longitude }
   }
-  if (updated.category !== undefined && (typeof updated.category !== 'string' || !updated.category.trim() || (isMongoReady() && !await Category.exists({ name: updated.category.trim(), active: true })))) return res.status(400).json({ error: 'Choose an active marketplace category' })
+  if (updated.category !== undefined && (typeof updated.category !== 'string' || !updated.category.trim() || !await Category.exists({ name: updated.category.trim(), active: true }))) return res.status(400).json({ error: 'Choose an active marketplace category' })
   if (updated.category !== undefined) updated.category = updated.category.trim()
   if (updated.contactPreference !== undefined && !['chat', 'call', 'whatsapp'].includes(updated.contactPreference)) {
     return res.status(400).json({ error: 'Choose chat, call, or WhatsApp as your contact preference' })
@@ -144,33 +151,15 @@ router.put('/:id', requireAuth, async (req, res, next) => { try {
     updated.contactPhone = updated.contactPhone.trim()
   }
   if (updated.contactPreference === 'chat') updated.contactPhone = ''
-  if (isMongoReady()) {
-    const updatedProduct = await Product.findOneAndUpdate({ id: req.params.id }, { $set: updated }, { new: true })
-    res.json(publicProduct(updatedProduct))
-  } else {
-    const data = await readStore()
-    const index = data.products.findIndex(item => item.id === req.params.id)
-    if (index < 0) return res.status(404).json({ error: 'Product not found' })
-    if (data.products[index].sellerId !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'You can only update your own listings' })
-    data.products[index] = { ...data.products[index], ...updated }
-    await writeStore(data)
-    res.json(publicProduct(data.products[index]))
-  }
+  const updatedProduct = await Product.findOneAndUpdate({ id: req.params.id }, { $set: updated }, { new: true })
+  res.json(publicProduct(updatedProduct))
 } catch (e) { next(e) } })
 router.delete('/:id', requireAuth, async (req, res, next) => { try {
-  if (isMongoReady()) {
-    const product = await Product.findOne({ id: req.params.id })
-    if (!product) return res.status(404).json({ error: 'Product not found' })
-    if (product.sellerId !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'You can only delete your own listings' })
-    await product.deleteOne()
-  } else {
-    const data = await readStore()
-    const product = data.products.find(item => item.id === req.params.id)
-    if (!product) return res.status(404).json({ error: 'Product not found' })
-    if (product.sellerId !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'You can only delete your own listings' })
-    data.products = data.products.filter(item => item.id !== req.params.id)
-    await writeStore(data)
-  }
+  if (!isMongoReady()) return res.status(503).json({ error: 'Deleting listings requires the marketplace database.' })
+  const product = await Product.findOne({ id: req.params.id })
+  if (!product) return res.status(404).json({ error: 'Product not found' })
+  if (product.sellerId !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'You can only delete your own listings' })
+  await product.deleteOne()
   res.status(204).end()
 } catch (e) { next(e) } })
 export default router

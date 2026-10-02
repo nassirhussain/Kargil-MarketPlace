@@ -2,6 +2,7 @@ import mongoose from 'mongoose'
 
 const hotelSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true, index: true },
+  ownerId: { type: String, required: true, index: true },
   name: String,
   category: String,
   location: String,

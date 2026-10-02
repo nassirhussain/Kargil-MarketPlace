@@ -1,17 +1,18 @@
 import { Router } from 'express'
 import Category from '../models/Category.js'
 import mongoose from 'mongoose'
+import { isMongoReady } from '../lib/mongodb.js'
 import { requireAuth } from '../middleware/auth.js'
 import { isAdmin } from '../lib/admin.js'
-import { defaultCategories } from '../lib/defaultCategories.js'
 
 const router = Router()
 const slugFor = name => name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 
 router.get('/', async (req, res, next) => {
   try {
+    if (!isMongoReady()) return res.status(503).json({ error: 'Categories are unavailable until the marketplace database is connected.' })
     const categories = await Category.find({ active: true }).sort({ order: 1, name: 1 }).lean()
-    res.json(categories.length ? categories : defaultCategories)
+    res.json(categories)
   } catch (error) { next(error) }
 })
 

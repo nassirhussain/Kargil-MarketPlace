@@ -1,39 +1,31 @@
-# Development Progress
+# Development Status
 
-## Completed
-- Audited the repository structure and confirmed this is a Vite + React frontend with an Express + MongoDB backend.
-- Reviewed the root app and server bootstrap files, and confirmed the project is already aligned to a Kargil marketplace idea.
-- Reviewed key backend routes for auth, products, messaging, moderation, follow/block, categories, and admin operations.
-- Confirmed MongoDB models and JWT-based auth are present for user status enforcement.
-- Confirmed verification and rate-limiting infrastructure exists for email/SMS OTP flows.
-- Confirmed admin and category APIs are implemented with server-side authorization checks.
-- Confirmed the repo includes a `.gitignore` that excludes `.env` and `.env.*` except `.env.example`.
-- Confirmed a basic test suite exists for OTP helper logic and API rate limiting.
+## Current architecture
 
-## In Progress
-- Aligning the remaining UI copy and seed data to the Kargil/Ladakh product story rather than leftover generic campus/demo phrasing.
-- Validating whether the front-end still relies too heavily on local demo data instead of live server-backed data on first load.
-- Checking the consistency of production deployment configuration and local environment setup.
+- React and Vite frontend with an Express, MongoDB, and JWT backend.
+- Listings, shops, hotels, categories, user accounts, wishlists, follows, blocks, reports, conversations, messages, ratings, and moderation use backend APIs backed by MongoDB.
+- Email OTP uses Resend; phone OTP uses Twilio Verify. Provider credentials are optional but required for delivery on the selected channel.
+- Browser storage retains the authentication token, a user display cache, a selected-town preference, and the post-auth navigation destination. Wishlist content is not stored in browser storage.
 
-## Remaining
-- Final polish of marketplace UX and local branding for Kargil/Ladakh, including product data and location-specific copy.
-- Ensure the front-end and backend fully use live data in deployed production and do not silently fall back to demo content when the API is unavailable.
-- Review the bundle and error handling for missing API configuration and production-specific crashes.
-- Validate production login, verification, messaging, reports, and admin flows against a real configured backend.
+## Data integrity and production safeguards
 
-## Bugs Found
-- The frontend still contains generic campus-style mock data and placeholder names (for example, North Quad, East Hall, Maple Court) that do not reflect a Kargil/Ladakh marketplace.
-- Some app flows appear to still rely on UI demodata and local seed data instead of strict live data from MongoDB when the API is available.
-- The app looks like a partially themed demo rather than a full localized marketplace, so the remaining work is in product and localization polish, not just infrastructure.
-- Missing runtime environment validation could leave the app looking functional while API-backed features are disabled.
+- Marketplace routes return database errors instead of reading JSON listing/shop/hotel fixtures.
+- Sample listing, shop, and hotel seeding has been removed. Existing fixture records already present in MongoDB require an intentional, reviewed cleanup; no production database records were deleted by this change.
+- Production startup requires MongoDB, JWT and OTP hash secrets, an admin allowlist, and frontend origins. Partial third-party provider configuration is rejected.
+- Production frontend builds require `VITE_API_BASE`.
+- The health endpoint reports `503` unless MongoDB is connected.
+- Initial category taxonomy records may be inserted into MongoDB if they are missing.
 
-## Environment Setup Required
-- Copy `.env.example` to `server/.env` and set real values for `MONGODB_URI`, `JWT_SECRET`, and any OTP provider credentials.
-- Set `FRONTEND_URL` and `API_URL` to the correct deployed origins.
-- Configure optional Google OAuth credentials if Google sign-in is enabled.
-- Set `VITE_API_BASE` to the deployed API base in production.
-- If using email/SMS verification, configure Resend/Twilio credentials and verified sender/service values.
+## Outstanding operational work
 
-## Next Priority
-- Complete the localization and content cleanup so the marketplace feels authentic to Kargil/Ladakh instead of generic campus/demo branding.
-- Validate the live backend flow end-to-end before user-facing release decisions.
+- Set and verify production environment variables in the hosting provider.
+- Configure Resend and/or Twilio credentials and verify real OTP delivery.
+- Review and remove previously seeded sample records from the production database.
+- Deploy the current changes and verify the live API and frontend after deployment.
+- Perform end-to-end tests with real user accounts and an admin account against a dedicated test database.
+
+## Validation
+
+- Run `npm run build` from the repository root with `VITE_API_BASE` set.
+- Run `npm test` from `server`.
+- No frontend lint or browser automation test command is configured in the repository.
