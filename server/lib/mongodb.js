@@ -1,6 +1,3 @@
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import mongoose from 'mongoose'
 
 export const mongoState = {
@@ -46,39 +43,11 @@ export function stripMongo(document) {
   return value
 }
 
-async function seedModel(Model, records) {
-  if (await Model.countDocuments() > 0) return
-  await Model.bulkWrite(records.map(record => ({
-    updateOne: { filter: { id: record.id }, update: { $setOnInsert: record }, upsert: true }
-  })))
-}
-
 export async function seedMongo() {
   if (!isMongoReady()) return
 
-  const shouldSeed = process.env.SEED_MONGO === 'true' || process.env.NODE_ENV !== 'production'
   const { defaultCategories } = await import('./defaultCategories.js')
-  const [{ default: Category }, { default: Product }] = await Promise.all([
-    import('../models/Category.js'),
-    import('../models/Product.js')
-  ])
+  const { default: Category } = await import('../models/Category.js')
 
   await Promise.all(defaultCategories.map(category => Category.updateOne({ slug: category.slug }, { $setOnInsert: category }, { upsert: true })))
-
-  if (!shouldSeed) {
-    return
-  }
-
-  const dataPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data.json')
-  const data = JSON.parse(await fs.readFile(dataPath, 'utf8'))
-  const [{ default: Shop }, { default: Hotel }] = await Promise.all([
-    import('../models/Shop.js'),
-    import('../models/Hotel.js')
-  ])
-
-  await Promise.all([
-    seedModel(Shop, data.shops || []),
-    seedModel(Product, data.products || []),
-    seedModel(Hotel, data.hotels || [])
-  ])
 }

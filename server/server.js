@@ -14,9 +14,11 @@ import reports from './routes/reports.js'
 import users from './routes/users.js'
 import categories from './routes/categories.js'
 import admin from './routes/admin.js'
+import wishlist from './routes/wishlist.js'
 import User from './models/User.js'
 import { requireAuth } from './middleware/auth.js'
 import { connectMongo, mongoState, seedMongo } from './lib/mongodb.js'
+import { validateServerEnvironment } from './lib/environment.js'
 
 const app = express()
 const port = process.env.PORT || 3001
@@ -65,10 +67,13 @@ app.use('/api/reports', reports)
 app.use('/api/users', users)
 app.use('/api/categories', categories)
 app.use('/api/admin', admin)
+app.use('/api/wishlist', wishlist)
 app.get('/api/me', requireAuth, (req, res) => res.json({ user: req.user }))
 app.get('/', (req, res) => res.json({ service: 'Kargil Marketplace API', health: '/api/health' }))
 app.use((err, req, res, next) => { console.error(err); res.status(500).json({ error: 'Unable to read marketplace data' }) })
 async function start() {
+  const environmentErrors = validateServerEnvironment()
+  if (environmentErrors.length) throw new Error(environmentErrors.join(' '))
   const connected = await connectMongo()
   if (connected) {
     try {
@@ -77,12 +82,14 @@ async function start() {
     } catch (error) {
       mongoState.status = 'error'
       mongoState.error = error.message
-      console.error(`MongoDB seed failed; using JSON marketplace fallback: ${error.message}`)
+      throw new Error(`MongoDB initialization failed: ${error.message}`)
     }
   } else if (mongoState.status === 'disabled') {
-    console.warn('MongoDB is not configured; using JSON marketplace fallback and auth is disabled.')
+    if (process.env.NODE_ENV === 'production') throw new Error('MONGODB_URI is required in production.')
+    console.warn('MongoDB is not configured; database-backed API routes will return 503.')
   } else {
-    console.error(`MongoDB connection failed; using JSON marketplace fallback and auth is disabled: ${mongoState.error}`)
+    if (process.env.NODE_ENV === 'production') throw new Error(`MongoDB connection failed: ${mongoState.error}`)
+    console.error(`MongoDB connection failed; database-backed API routes will return 503: ${mongoState.error}`)
   }
   app.listen(port, () => console.log(`Kargil Marketplace API listening on http://localhost:${port}`))
 }

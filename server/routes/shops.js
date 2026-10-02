@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import Shop from '../models/Shop.js'
 import Product from '../models/Product.js'
+import User from '../models/User.js'
 import { isMongoReady, stripMongo } from '../lib/mongodb.js'
 import { requireAuth } from '../middleware/auth.js'
 
@@ -24,13 +25,17 @@ const publicProduct = product => {
 router.get('/', async (req, res, next) => {
   try {
     if (!isMongoReady()) return res.status(503).json({ error: 'Local shops are unavailable until the database is connected.' })
-    const shops = await Shop.find().sort({ name: 1 }).lean()
+    const suspendedSellerIds = (await User.find({
+      $or: [{ blocked: true }, { status: { $in: ['suspended', 'banned'] } }]
+    }).distinct('_id')).map(String)
+    const shops = await Shop.find({ ownerId: { $nin: suspendedSellerIds } }).sort({ name: 1 }).lean()
     const products = await Product.find({
       $or: [
         { shopId: { $in: shops.map(shop => shop.id) } },
         { id: { $in: shops.flatMap(shop => shop.productIds || []) } }
       ],
-      status: { $nin: ['Sold', 'Rejected'] }
+      status: { $nin: ['Sold', 'Rejected'] },
+      sellerId: { $nin: suspendedSellerIds }
     }).lean()
     const productsByShop = new Map()
     for (const shop of shops) {
@@ -47,9 +52,14 @@ router.get('/:id', async (req, res, next) => {
     if (!isMongoReady()) return res.status(503).json({ error: 'Local shops are unavailable until the database is connected.' })
     const shop = await Shop.findOne({ id: req.params.id }).lean()
     if (!shop) return res.status(404).json({ error: 'Shop not found' })
+    const suspendedSellerIds = (await User.find({
+      $or: [{ blocked: true }, { status: { $in: ['suspended', 'banned'] } }]
+    }).distinct('_id')).map(String)
+    if (suspendedSellerIds.includes(shop.ownerId)) return res.status(404).json({ error: 'Shop not found' })
     const products = await Product.find({
       $or: [{ shopId: shop.id }, { id: { $in: shop.productIds || [] } }],
-      status: { $nin: ['Sold', 'Rejected'] }
+      status: { $nin: ['Sold', 'Rejected'] },
+      sellerId: { $nin: suspendedSellerIds }
     }).sort({ createdAt: -1 }).lean()
     res.json({ ...stripMongo(shop), products: products.map(publicProduct) })
   } catch (error) { next(error) }
