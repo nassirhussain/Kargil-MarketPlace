@@ -21,6 +21,8 @@ services:
         sync: false
       - key: FRONTEND_URL
         sync: false
+      - key: OAUTH_FRONTEND_URL
+        sync: false
       - key: API_URL
         sync: false
     autoDeploy: true

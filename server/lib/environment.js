@@ -1,3 +1,5 @@
+import { allowedFrontendOrigins, googleCallbackUrl, oauthFrontendOrigin } from './oauth.js'
+
 const groups = [
   ['email OTP provider', ['RESEND_API_KEY', 'EMAIL_FROM']],
   ['SMS OTP provider', ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_VERIFY_SERVICE_SID']],
@@ -19,8 +21,12 @@ export function validateServerEnvironment(env = process.env) {
   if (env.NODE_ENV === 'production' && env.SEED_MONGO === 'true') {
     errors.push('SEED_MONGO=true is forbidden in production.')
   }
-  if (production && env.GOOGLE_CLIENT_ID?.trim() && !env.API_URL?.trim() && !env.RENDER_EXTERNAL_URL?.trim()) {
-    errors.push('API_URL is required for Google OAuth in production.')
+  if (env.FRONTEND_URL?.trim()) {
+    try { allowedFrontendOrigins(env) } catch (error) { errors.push(error.message) }
+  }
+  if (env.GOOGLE_CLIENT_ID?.trim() && env.GOOGLE_CLIENT_SECRET?.trim()) {
+    try { googleCallbackUrl(env) } catch (error) { errors.push(error.message) }
+    try { oauthFrontendOrigin(env) } catch (error) { errors.push(error.message) }
   }
   return errors
 }

@@ -6,9 +6,46 @@ import Follow from '../models/Follow.js'
 import Block from '../models/Block.js'
 import Product from '../models/Product.js'
 import { isAdmin } from '../lib/admin.js'
+import { requireAdmin } from '../middleware/admin.js'
+import { activeAdminFilter, escapeRegex, hasInvalidAdminStrings, paginatedResult, parseAdminPage } from '../lib/adminQueries.js'
+import AdminActionLock from '../models/AdminActionLock.js'
+import { updateAdminTargetStatus } from '../lib/adminStatus.js'
+import { isMongoReady } from '../lib/mongodb.js'
 
 const router = Router()
 const validId = id => mongoose.isValidObjectId(id)
+const setAccountStatus = async (req, targetId, status) => updateAdminTargetStatus({
+  actorId: req.user.id,
+  targetId,
+  status,
+  findUser: id => User.findById(id).select('email role status blocked').lean(),
+  isAdmin,
+  countActiveAdmins: () => User.countDocuments(activeAdminFilter()),
+  acquireLock: async owner => {
+    const now = new Date()
+    try {
+      const lock = await AdminActionLock.findOneAndUpdate(
+        { _id: 'active-admin-status', $or: [{ lockedUntil: { $exists: false } }, { lockedUntil: { $lt: now } }] },
+        { $set: { owner, lockedUntil: new Date(now.getTime() + 15_000) } },
+        { upsert: true, new: true }
+      )
+      return lock?.owner === owner
+    } catch (error) {
+      if (error.code === 11000) return false
+      throw error
+    }
+  },
+  releaseLock: owner => AdminActionLock.updateOne(
+    { _id: 'active-admin-status', owner },
+    { $unset: { owner: 1, lockedUntil: 1 } }
+  ),
+  updateUser: async id => {
+    const updated = await User.findByIdAndUpdate(id, { status, blocked: status !== 'active' }, { new: true }).select('name status blocked')
+    return updated
+      ? { status: 200, body: { id: String(updated._id), name: updated.name, status: updated.status, blocked: updated.blocked } }
+      : { status: 404, error: 'User not found' }
+  }
+})
 
 router.get('/preferences/me', requireAuth, async (req, res, next) => {
   try {
@@ -84,11 +121,29 @@ router.get('/:id', async (req, res, next) => {
   } catch (error) { next(error) }
 })
 
-router.get('/', requireAuth, async (req, res, next) => {
+router.get('/', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    if (!isAdmin(req.user)) return res.status(403).json({ error: 'Admin access required' })
-    const users = await User.find().select('name email phone location role status blocked createdAt').sort({ createdAt: -1 }).limit(500).lean()
-    res.json(users.map(user => ({
+    if (!isMongoReady()) return res.status(503).json({ error: 'User management requires the marketplace database.' })
+    const page = parseAdminPage(req.query)
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : ''
+    const status = typeof req.query.status === 'string' ? req.query.status : 'all'
+    if (!page || hasInvalidAdminStrings(req.query, ['q', 'status']) || q.length > 120 || !['all', 'active', 'suspended', 'banned'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid user filters or pagination.' })
+    }
+    const conditions = []
+    if (status === 'active') conditions.push({ blocked: { $ne: true }, status: { $nin: ['suspended', 'banned'] } })
+    else if (status === 'suspended') conditions.push({ $or: [{ status: 'suspended' }] })
+    else if (status === 'banned') conditions.push({ $or: [{ status: 'banned' }, { blocked: true, status: { $ne: 'suspended' } }] })
+    if (q) {
+      const expression = new RegExp(escapeRegex(q), 'i')
+      conditions.push({ $or: [{ name: expression }, { email: expression }, { phone: expression }, { location: expression }] })
+    }
+    const filter = conditions.length ? { $and: conditions } : {}
+    const [records, total] = await Promise.all([
+      User.find(filter).select('name email phone location role status blocked createdAt').sort({ createdAt: -1, _id: -1 }).skip(page.skip).limit(page.pageSize).lean(),
+      User.countDocuments(filter)
+    ])
+    res.json(paginatedResult(records.map(user => ({
       id: String(user._id),
       name: user.name,
       email: user.email,
@@ -98,33 +153,30 @@ router.get('/', requireAuth, async (req, res, next) => {
       status: user.blocked ? (user.status === 'suspended' ? 'suspended' : 'banned') : (user.status || 'active'),
       blocked: Boolean(user.blocked || user.status === 'banned'),
       joinedAt: user.createdAt
-    })))
+    })), total, page))
   } catch (error) { next(error) }
 })
 
-router.patch('/:id/status', requireAuth, async (req, res, next) => {
+router.patch('/:id/status', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    if (!isAdmin(req.user)) return res.status(403).json({ error: 'Admin access required' })
     if (!validId(req.params.id)) return res.status(404).json({ error: 'User not found' })
-    if (String(req.user.id) === req.params.id) return res.status(400).json({ error: 'You cannot suspend your own account' })
     const status = req.body.status
-    if (!['active', 'suspended', 'banned'].includes(status)) return res.status(400).json({ error: 'Choose active, suspended, or banned status' })
-    const user = await User.findByIdAndUpdate(req.params.id, { status, blocked: status !== 'active' }, { new: true }).select('name status blocked')
-    if (!user) return res.status(404).json({ error: 'User not found' })
-    res.json({ id: String(user._id), name: user.name, status: user.status, blocked: user.blocked })
+    if (!isMongoReady()) return res.status(503).json({ error: 'User management requires the marketplace database.' })
+    const result = await setAccountStatus(req, req.params.id, status)
+    if (result.error) return res.status(result.status).json({ error: result.error })
+    res.status(result.status).json(result.body)
   } catch (error) { next(error) }
 })
 
-router.patch('/:id/block', requireAuth, async (req, res, next) => {
+router.patch('/:id/block', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    if (!isAdmin(req.user)) return res.status(403).json({ error: 'Admin access required' })
     if (!validId(req.params.id)) return res.status(404).json({ error: 'User not found' })
     if (String(req.user.id) === req.params.id) return res.status(400).json({ error: 'You cannot block your own account' })
     if (typeof req.body.blocked !== 'boolean') return res.status(400).json({ error: 'Blocked must be true or false' })
-    const status = req.body.blocked ? 'banned' : 'active'
-    const user = await User.findByIdAndUpdate(req.params.id, { status, blocked: req.body.blocked }, { new: true }).select('name status blocked')
-    if (!user) return res.status(404).json({ error: 'User not found' })
-    res.json({ id: String(user._id), name: user.name, status: user.status, blocked: user.blocked })
+    if (!isMongoReady()) return res.status(503).json({ error: 'User management requires the marketplace database.' })
+    const result = await setAccountStatus(req, req.params.id, req.body.blocked ? 'banned' : 'active')
+    if (result.error) return res.status(result.status).json({ error: result.error })
+    res.status(result.status).json(result.body)
   } catch (error) { next(error) }
 })
 

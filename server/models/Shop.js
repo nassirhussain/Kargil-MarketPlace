@@ -8,7 +8,9 @@ const shopSchema = new mongoose.Schema({
   contactNumber: String,
   description: String,
   ownerId: { type: String, index: true },
-  productIds: [String]
+  productIds: [String],
+  approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected', 'suspended'] },
+  moderationReason: { type: String, maxlength: 500 }
 }, { strict: false, timestamps: true })
 
 export default mongoose.models.Shop || mongoose.model('Shop', shopSchema)

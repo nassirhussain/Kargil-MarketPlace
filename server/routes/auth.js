@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { randomBytes } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import passport from 'passport'
@@ -9,16 +10,50 @@ import Verification from '../models/Verification.js'
 import { checkPhoneCode, configuredProvider, matchesEmailCode, newEmailCode, sendEmailCode, sendPhoneCode } from '../lib/verificationProviders.js'
 import { isAdmin } from '../lib/admin.js'
 import { rateLimit } from '../middleware/rateLimit.js'
+import OAuthExchange from '../models/OAuthExchange.js'
+import { consumeOAuthExchange, googleCallbackUrl, hashOAuthExchangeCode, matchesOAuthState, oauthFailureCode, oauthFrontendCallbackUrl, oauthFrontendOrigin, oauthStateCookieOptions } from '../lib/oauth.js'
+import { logDiagnostic } from '../lib/diagnostics.js'
 
 const router = Router()
 const configured = () => Boolean(process.env.JWT_SECRET && isMongoReady())
+const oauthStateCookie = 'campuskart_google_state'
 const normalizePhone = value => typeof value === 'string' ? value.trim().replace(/[ ()-]/g, '') : undefined
 const accountStatus = user => user.blocked
   ? (user.status === 'suspended' ? 'suspended' : 'banned')
   : (user.status || 'active')
-const publicUser = user => ({ id: user.id, email: user.email, name: user.name, phone: user.phone, college: user.college, area: user.area, location: user.location, avatar: user.avatar, emailVerified: Boolean(user.emailVerified), phoneVerified: Boolean(user.phoneVerified), role: isAdmin(user) ? 'admin' : 'user', status: accountStatus(user) })
+export const publicUser = user => ({ id: String(user.id), email: user.email, name: user.name, phone: user.phone, college: user.college, area: user.area, location: user.location, avatar: user.avatar, emailVerified: Boolean(user.emailVerified), phoneVerified: Boolean(user.phoneVerified), role: isAdmin(user) ? 'admin' : 'user', status: accountStatus(user) })
 const tokenFor = user => jwt.sign({ sub: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' })
 const unavailable = (req, res, next) => configured() ? next() : res.status(503).json({ error: 'Authentication is not configured. Set MONGODB_URI and JWT_SECRET.' })
+const cookieOptions = () => oauthStateCookieOptions()
+const readCookie = (req, name) => {
+  const cookie = req.headers.cookie?.split(';').map(part => part.trim()).find(part => part.startsWith(`${name}=`))
+  return cookie ? cookie.slice(name.length + 1) : ''
+}
+const clearOAuthState = res => res.clearCookie(oauthStateCookie, cookieOptions())
+const oauthDiagnosticCodes = {
+  google_cancelled: 'OAUTH_PROVIDER_CANCELLED',
+  invalid_state: 'OAUTH_STATE_INVALID',
+  oauth_unavailable: 'OAUTH_CONFIGURATION_UNAVAILABLE',
+  account_unavailable: 'OAUTH_ACCOUNT_UNAVAILABLE',
+  google_failed: 'OAUTH_PROVIDER_FAILED'
+}
+const logOAuthFailure = (res, code, error) => logDiagnostic({
+  event: 'oauth.flow',
+  code: oauthDiagnosticCodes[oauthFailureCode(code)],
+  requestId: res.locals.requestId,
+  error
+})
+const redirectOAuthFailure = (res, code, error) => {
+  logOAuthFailure(res, code, error)
+  let frontend
+  try { frontend = oauthFrontendOrigin() } catch {
+    return res.status(503).json({ error: 'Google sign-in is unavailable because its frontend destination is not configured.' })
+  }
+  const destination = new URL('/login', frontend)
+  destination.searchParams.set('oauth_error', oauthFailureCode(code))
+  clearOAuthState(res)
+  return res.redirect(destination.toString())
+}
 
 router.post('/signup', rateLimit({ limit: 8, windowMs: 60 * 60_000, keyPrefix: 'signup' }), unavailable, async (req, res, next) => {
   try {
@@ -144,14 +179,71 @@ router.post('/verification/confirm', requireAuth, rateLimit({ limit: 10, windowM
 })
 
 router.get('/google', (req, res, next) => {
-  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) return res.status(503).json({ error: 'Google OAuth is not configured' })
-  if (!configured()) return unavailable(req, res, next)
-  passport.authenticate('google', { scope: ['profile', 'email'], session: false })(req, res, next)
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) return redirectOAuthFailure(res, 'oauth_unavailable')
+  if (!configured()) return redirectOAuthFailure(res, 'oauth_unavailable')
+  let state
+  try {
+    googleCallbackUrl()
+    oauthFrontendOrigin()
+    state = randomBytes(32).toString('base64url')
+  } catch (error) {
+    return redirectOAuthFailure(res, 'oauth_unavailable', error)
+  }
+  res.cookie(oauthStateCookie, state, { ...cookieOptions(), maxAge: 5 * 60_000 })
+  passport.authenticate('google', { scope: ['profile', 'email'], session: false, state, prompt: 'select_account' })(req, res, next)
 })
 
-router.get('/google/callback', unavailable, passport.authenticate('google', { session: false, failureRedirect: '/api/auth/google/failure' }), (req, res) => {
-  const frontend = process.env.FRONTEND_URL || 'http://localhost:5173'
-  res.redirect(`${frontend.replace(/\/$/, '')}/auth/callback?token=${encodeURIComponent(tokenFor(req.user))}`)
+router.get('/google/callback', (req, res, next) => {
+  try {
+    googleCallbackUrl()
+    oauthFrontendOrigin()
+  } catch (error) {
+    return redirectOAuthFailure(res, 'oauth_unavailable', error)
+  }
+  const expectedState = readCookie(req, oauthStateCookie)
+  const receivedState = typeof req.query.state === 'string' ? req.query.state : ''
+  if (!matchesOAuthState(expectedState, receivedState)) return redirectOAuthFailure(res, 'invalid_state')
+  clearOAuthState(res)
+  if (req.query.error) return redirectOAuthFailure(res, req.query.error === 'access_denied' ? 'google_cancelled' : 'google_failed')
+  if (!configured()) return redirectOAuthFailure(res, 'oauth_unavailable')
+  passport.authenticate('google', { session: false }, async (error, user, info) => {
+    if (error || !user || accountStatus(user) !== 'active') {
+      return redirectOAuthFailure(res, info?.message === 'This account is not active' ? 'account_unavailable' : 'google_failed', error)
+    }
+    try {
+      const code = randomBytes(32).toString('base64url')
+      await OAuthExchange.create({ codeHash: hashOAuthExchangeCode(code), userId: user.id, expiresAt: new Date(Date.now() + 2 * 60_000) })
+      res.setHeader('Referrer-Policy', 'no-referrer')
+      res.setHeader('Cache-Control', 'no-store')
+      return res.redirect(oauthFrontendCallbackUrl(process.env, code))
+    } catch (error) {
+      return redirectOAuthFailure(res, 'google_failed', error)
+    }
+  })(req, res, next)
 })
-router.get('/google/failure', (req, res) => res.status(401).json({ error: 'Google authentication failed' }))
+router.post('/google/exchange', rateLimit({ limit: 10, windowMs: 15 * 60_000, keyPrefix: 'google-exchange' }), unavailable, async (req, res, next) => {
+  try {
+    const code = req.body?.code
+    const exchange = await consumeOAuthExchange(code, {
+      findOneAndDelete: filter => OAuthExchange.findOneAndDelete(filter),
+      findUserById: userId => User.findById(userId)
+    })
+    if (exchange.status === 400 || exchange.status === 401) {
+      logDiagnostic({
+        event: 'oauth.exchange',
+        code: exchange.status === 400 ? 'OAUTH_CODE_MALFORMED' : 'OAUTH_CODE_INVALID_OR_EXPIRED',
+        requestId: res.locals.requestId
+      })
+      return res.status(exchange.status).json({ error: 'Google sign-in code is invalid or expired. Try signing in again.', requestId: res.locals.requestId })
+    }
+    const user = exchange.user
+    if (accountStatus(user) !== 'active') {
+      logDiagnostic({ event: 'oauth.exchange', code: 'OAUTH_ACCOUNT_UNAVAILABLE', requestId: res.locals.requestId })
+      return res.status(403).json({ error: 'This account is not active. Contact support if you believe this is a mistake.', requestId: res.locals.requestId })
+    }
+    res.setHeader('Cache-Control', 'no-store')
+    res.json({ token: tokenFor(user), user: publicUser(user) })
+  } catch (error) { next(error) }
+})
+router.get('/google/failure', (req, res) => redirectOAuthFailure(res, req.query.error === 'access_denied' ? 'google_cancelled' : 'google_failed'))
 export default router

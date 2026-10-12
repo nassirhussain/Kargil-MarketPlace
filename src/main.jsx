@@ -3,9 +3,11 @@ import { createPortal } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Link, NavLink, useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
 import { Search, Heart, MessageCircle, ShoppingBag, Plus, Menu, X, ChevronRight, MapPin, Star, ArrowRight, BookOpen, Armchair, Shirt, SlidersHorizontal, Package, TrendingUp, CheckCircle2, Send, Smartphone, CarFront, Dumbbell, CookingPot, BriefcaseBusiness, House, Wrench, Repeat2, Share2, Flag, LocateFixed, BadgeCheck, ShieldAlert, Phone, Navigation, Store, AlertCircle, CircleCheck, Info, LogOut, UserRound, LayoutList, ChevronDown, LoaderCircle } from 'lucide-react'
+import GoogleAuthCallback from './AuthCallback.jsx'
+import AdminModerationDashboard from './AdminDashboard.jsx'
 import './styles.css'
 
-const API_BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? '/api' : '')
+const API_BASE = (import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? '/api' : '')).replace(/\/+$/, '')
 const authHeaders = (json = false) => {
   const headers = {}
   if (json) headers['Content-Type'] = 'application/json'
@@ -13,6 +15,20 @@ const authHeaders = (json = false) => {
   if (token) headers.Authorization = `Bearer ${token}`
   return headers
 }
+const safePostAuthPath = path => {
+  if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//') || path.includes('\\')) return '/profile'
+  try {
+    const url = new URL(path, window.location.origin)
+    return url.origin === window.location.origin ? `${url.pathname}${url.search}${url.hash}` : '/profile'
+  } catch { return '/profile' }
+}
+const oauthErrorMessage = code => ({
+  google_cancelled: 'Google sign-in was cancelled. You can try again or use email or phone instead.',
+  invalid_state: 'This sign-in attempt expired or could not be verified. Please start again.',
+  oauth_unavailable: 'Google sign-in is temporarily unavailable. Please try another sign-in method or try again later.',
+  google_failed: 'Google could not complete sign-in. Please try again.',
+  account_unavailable: 'This account is not active. Contact support if you believe this is a mistake.'
+}[code] || '')
 const formatINR = value => `₹${Number(value || 0).toLocaleString('en-IN')}`
 const locations = ['Kargil', 'Drass', 'Sankoo', 'Zanskar', 'Shargole', 'Taisuru', 'Barsoo', 'Other Ladakh locations']
 const canonicalCategory = value => ({
@@ -212,7 +228,7 @@ function ProfilePage({user,setUser,products,favorites,blockedSellers,setBlockedS
     <section className="profile-section mt-5"><div className="profile-section-heading"><span className="profile-section-icon"><BadgeCheck size={18}/></span><div><h2>Account verification</h2><p>Verification codes expire after 10 minutes. Never share your code with anyone.</p></div></div><div className="mt-4 flex flex-wrap gap-3">{user.email&&<button onClick={()=>setVerificationChannel('email')} className={`rounded-xl px-4 py-2 text-sm font-bold ${verificationChannel==='email'?'bg-teal text-white':'bg-cream text-ink'}`}>Email {user.emailVerified?'verified':'not verified'}</button>}{user.phone&&<button onClick={()=>setVerificationChannel('phone')} className={`rounded-xl px-4 py-2 text-sm font-bold ${verificationChannel==='phone'?'bg-teal text-white':'bg-cream text-ink'}`}>Phone {user.phoneVerified?'verified':'not verified'}</button>}</div>{((verificationChannel==='email'&&user.email&&!user.emailVerified)||(verificationChannel==='phone'&&user.phone&&!user.phoneVerified))&&<form onSubmit={confirmVerification} className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_auto]"><input inputMode="numeric" autoComplete="one-time-code" maxLength="6" pattern="[0-9]{6}" value={verificationCode} onChange={event=>setVerificationCode(event.target.value.replace(/\D/g,'').slice(0,6))} placeholder="6-digit code" aria-label="Verification code" className="rounded-xl border border-ink/10 px-4 py-3"/><button type="button" disabled={verificationBusy||resendSeconds>0} onClick={requestVerification} className="rounded-xl border px-4 py-3 text-sm font-bold disabled:opacity-50">{verificationBusy?'Please wait…':resendSeconds?`Resend in ${resendSeconds}s`:'Send / resend code'}</button><button disabled={verificationBusy||verificationCode.length!==6} className="rounded-xl bg-teal px-4 py-3 text-sm font-bold text-white disabled:opacity-50">Verify code</button></form>}{verificationError&&<Notice kind="error" className="mt-3">{verificationError}</Notice>}{verificationMessage&&<Notice kind="success" className="mt-3">{verificationMessage}</Notice>}</section>
     <section className="mt-5 rounded-2xl bg-white p-5 shadow-sm"><h2 className="text-lg font-black">Following and blocked accounts</h2><p className="mt-1 text-sm text-ink/55">These preferences sync with your account across devices.</p>{relationshipError&&<p role="alert" className="mt-3 text-sm font-semibold text-red-700">{relationshipError}</p>}{relationshipIds.length?relationshipProfiles.map(profile=><div key={profile.id} className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3"><Link to={`/seller/${profile.id}`} className="font-bold text-teal">{profile.name||'Marketplace seller'}<span className="ml-2 text-xs font-normal text-ink/45">{blockedSellers.includes(profile.id)?'Blocked':'Following'}</span></Link><div className="flex gap-2">{followedSellers.includes(profile.id)&&<button disabled={relationshipBusy===profile.id} onClick={()=>removeRelationship(profile.id,'follow')} className="rounded-lg border px-3 py-2 text-xs font-bold">Unfollow</button>}{blockedSellers.includes(profile.id)&&<button disabled={relationshipBusy===profile.id} onClick={()=>removeRelationship(profile.id,'block')} className="rounded-lg border border-teal/20 px-3 py-2 text-xs font-bold text-teal">Unblock</button>}</div></div>):<p className="mt-4 text-sm text-ink/50">You are not following or blocking anyone.</p>}</section>
     <div className="mt-5 flex flex-wrap gap-3"><Link to="/my-listings" className="rounded-xl bg-teal px-4 py-3 text-sm font-bold text-white">My listings ({mine.length})</Link><Link to="/wishlist" className="rounded-xl bg-white px-4 py-3 text-sm font-bold shadow-sm">Wishlist ({favorites.length})</Link><Link to="/dashboard" className="rounded-xl bg-white px-4 py-3 text-sm font-bold shadow-sm">Seller dashboard</Link></div>
-    {ratingError&&<p role="alert" className="mt-5 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-900">Unable to load seller ratings: {ratingError}</p>}<div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Stat icon={ShoppingBag} label="Active listings" value={active} trend="Available"/><Stat icon={CheckCircle2} label="Sold items" value={sold} trend="Completed"/><Stat icon={Heart} label="Saved items" value={favorites.length} trend="Synced to account"/><Stat icon={Star} label="Seller rating" value={rating.count?rating.average.toFixed(1):'—'} trend={`${rating.count} ratings`}/></div>
+    {ratingError&&<Notice kind="warning" className="mt-5">Unable to load seller ratings: {ratingError}</Notice>}<div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Stat icon={ShoppingBag} label="Active listings" value={active} trend="Available"/><Stat icon={CheckCircle2} label="Sold items" value={sold} trend="Completed"/><Stat icon={Heart} label="Saved items" value={favorites.length} trend="Synced to account"/><Stat icon={Star} label="Seller rating" value={rating.count?rating.average.toFixed(1):'—'} trend={`${rating.count} ratings`}/></div>
   </div>
 }
 function App() {
@@ -302,7 +318,7 @@ function App() {
     const redirect = sessionStorage.getItem('campuskart-after-auth')
     if (user && redirect) {
       sessionStorage.removeItem('campuskart-after-auth')
-      appNavigate(redirect)
+      appNavigate(safePostAuthPath(redirect))
     }
   }, [user, appNavigate])
   useEffect(() => {
@@ -409,19 +425,21 @@ function App() {
   const visibleProducts=products.filter(product=>product.status!=='Rejected'&&!blockedSellers.includes(product.sellerId))
   const activeCategories=marketCategories.filter(category=>category.active!==false)
   return <div className="min-h-screen bg-cream text-ink"><PageMeta /><Header menu={menu} setMenu={setMenu} user={user} setUser={setUser} favoritesCount={favorites.length} unreadTotal={unreadTotal} /><div className="toast-stack" aria-live="polite">{toast&&<Notice kind={toast.kind} message={toast.message} onDismiss={()=>setToast(null)}/>}</div><main>
-    {preferencesError&&<p role="alert" className="mx-auto mt-3 max-w-7xl rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">{preferencesError} Follow and block controls need a signed-in connection.</p>}
-    {sessionError&&<div role="alert" className="mx-auto mt-3 flex max-w-7xl flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900"><span>Unable to validate your session: {sessionError}</span><button onClick={()=>setSessionRetry(value=>value+1)} className="rounded-lg bg-amber-800 px-3 py-2 text-white">Try again</button></div>}
-    {categoriesError&&<div role="alert" className="mx-auto mt-3 flex max-w-7xl flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900"><span>Unable to load marketplace categories: {categoriesError}</span><button onClick={()=>setCategoriesRetry(value=>value+1)} className="rounded-lg bg-amber-800 px-3 py-2 text-white">Try again</button></div>}
-    {wishlistError&&<p role="alert" className="mx-auto mt-3 max-w-7xl rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{wishlistError}</p>}
-    {unreadError&&<p role="alert" className="mx-auto mt-3 max-w-7xl rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">Unable to refresh unread messages: {unreadError}</p>}
-    {productsError&&<div role="alert" className="mx-auto mt-3 flex max-w-7xl flex-wrap items-center justify-between gap-3 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700"><span>Unable to load listings: {productsError}</span><button onClick={()=>setProductsRetry(value=>value+1)} className="rounded-lg bg-red-700 px-3 py-2 text-white">Try again</button></div>}
+    {preferencesError&&<Notice kind="warning" className="mx-auto mt-3 max-w-7xl">{preferencesError} Follow and block controls need a signed-in connection.</Notice>}
+    {sessionError&&<Notice kind="warning" className="mx-auto mt-3 max-w-7xl">Unable to validate your session: {sessionError}<button onClick={()=>setSessionRetry(value=>value+1)} className="ml-3 underline">Try again</button></Notice>}
+    {categoriesError&&<Notice kind="warning" className="mx-auto mt-3 max-w-7xl">Unable to load marketplace categories: {categoriesError}<button onClick={()=>setCategoriesRetry(value=>value+1)} className="ml-3 underline">Try again</button></Notice>}
+    {wishlistError&&<Notice kind="error" className="mx-auto mt-3 max-w-7xl">{wishlistError}</Notice>}
+    {unreadError&&<Notice kind="warning" className="mx-auto mt-3 max-w-7xl">Unable to refresh unread messages: {unreadError}</Notice>}
+    {productsError&&<Notice kind="error" className="mx-auto mt-3 max-w-7xl">Unable to load listings: {productsError}<button onClick={()=>setProductsRetry(value=>value+1)} className="ml-3 underline">Try again</button></Notice>}
     <Routes>
     <Route path="/" element={<Home products={visibleProducts} productsLoading={productsLoading} favorites={favorites} toggleFavorite={toggleFavorite} selectedLocation={selectedLocation} setSelectedLocation={setSelectedLocation} coordinates={coordinates} setNearby={setNearby} categoryData={activeCategories} />} />
     <Route path="/browse" element={<Browse products={visibleProducts} productsLoading={productsLoading} favorites={favorites} toggleFavorite={toggleFavorite} selectedLocation={selectedLocation} setSelectedLocation={setSelectedLocation} coordinates={coordinates} setNearby={setNearby} categoryData={activeCategories} />} />
     <Route path="/marketplace" element={<Browse products={visibleProducts} productsLoading={productsLoading} favorites={favorites} toggleFavorite={toggleFavorite} selectedLocation={selectedLocation} setSelectedLocation={setSelectedLocation} coordinates={coordinates} setNearby={setNearby} categoryData={activeCategories} />} />
     <Route path="/shops" element={<Shops user={user} categoryData={activeCategories} />} />
     <Route path="/hotels" element={<Hotels user={user} />} />
-    <Route path="/about" element={<About />} />
+    <Route path="/about" element={<EditorialAbout />} />
+    <Route path="/privacy" element={<TrustDocument kind="privacy" />} />
+    <Route path="/terms" element={<TrustDocument kind="terms" />} />
     <Route path="/product/:id" element={<Product products={visibleProducts} favorites={favorites} toggleFavorite={toggleFavorite} user={user} />} />
     <Route path="/seller/:sellerId" element={<SellerProfile followedSellers={followedSellers} setFollowedSellers={setFollowedSellers} blockedSellers={blockedSellers} setBlockedSellers={setBlockedSellers} user={user} />} />
     <Route path="/sell" element={<Sell setProducts={setProducts} user={user} selectedLocation={selectedLocation} categoryData={activeCategories} />} />
@@ -430,13 +448,13 @@ function App() {
     <Route path="/dashboard" element={<Dashboard products={products} user={user} />} />
     <Route path="/messages" element={<Messages user={user} />} />
     <Route path="/chat" element={<Messages user={user} />} />
-    <Route path="/auth/callback" element={<AuthCallback setUser={setUser} />} />
+    <Route path="/auth/callback" element={<GoogleAuthCallback setUser={setUser} />} />
     <Route path="/login" element={<Auth mode="login" setUser={setUser} />} />
     <Route path="/signup" element={<Auth mode="signup" setUser={setUser} />} />
-    <Route path="/admin" element={<AdminDashboard products={products} setProducts={setProducts} user={user} categoryData={marketCategories} setCategoryData={setMarketCategories} />} />
+    <Route path="/admin" element={<AdminModerationDashboard user={user} categoryData={marketCategories} setCategoryData={setMarketCategories} />} />
     <Route path="/profile" element={<ProfilePage user={user} setUser={setUser} products={products} favorites={favorites} blockedSellers={blockedSellers} setBlockedSellers={setBlockedSellers} followedSellers={followedSellers} setFollowedSellers={setFollowedSellers} />} />
     <Route path="*" element={<NotFound />} />
-  </Routes></main><Footer /></div>
+  </Routes></main><Footer /><LegalFooterLinks /></div>
 }
 function NotFound() {
   return <div className="not-found-page"><p className="eyebrow">404 <span>·</span> KARGIL MARKETPLACE</p><h1>The trail<br/><em>ends here.</em></h1><p>The page you’re looking for could not be found. It may have moved, or the address may be mistyped.</p><div><Link to="/" className="button-dark px-5 py-3 text-sm font-semibold">Return home <ArrowRight size={16}/></Link><Link to="/marketplace" className="button-outline px-5 py-3 text-sm font-semibold">Browse marketplace</Link></div></div>
@@ -636,7 +654,7 @@ function SellerProfile({followedSellers,setFollowedSellers,blockedSellers,setBlo
     <Link to="/marketplace" className="text-sm font-bold text-teal">← Back to marketplace</Link>
     <section className="seller-profile-cover mt-7 flex flex-col gap-5 sm:flex-row sm:items-center">
       <div className="grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-full bg-coral text-2xl font-black">{profile?.avatar?<img src={profile.avatar} alt={`${sellerName} profile`} className="h-full w-full object-cover"/>:sellerName.slice(0,2).toUpperCase()}</div>
-      <div className="min-w-0 flex-1"><p className="text-sm text-white/60">Seller profile</p><div className="mt-1 flex flex-wrap items-center gap-2"><h1 className="text-3xl font-black">{sellerName}</h1>{profile?.verified&&<span className="flex items-center gap-1 rounded-full bg-blue-100 px-2 py-1 text-xs font-bold text-blue-800"><BadgeCheck size={14}/>Verified</span>}</div><p className="mt-1 text-sm text-white/65">{[profile?.area,profile?.location].filter(Boolean).join(' · ')||'Location not provided'}{profile?.joinedAt&&` · Joined ${new Date(profile.joinedAt).toLocaleDateString(undefined,{month:'short',year:'numeric'})}`}</p><p className="mt-2 flex items-center gap-2 text-sm text-white/75"><Star size={16} fill="#fbbf24" className="text-yellow-400"/>{rating.count?`${rating.average.toFixed(1)} out of 5 · ${rating.count} ${rating.count===1?'rating':'ratings'}`:'No ratings yet'}</p></div>
+      <div className="min-w-0 flex-1"><p className="text-sm text-white/60">Seller profile</p><div className="mt-1 flex flex-wrap items-center gap-2"><h1 className="text-3xl font-black">{sellerName}</h1>{(profile?.emailVerified||profile?.phoneVerified)&&<span className="seller-verified"><BadgeCheck size={14}/>Verified contact</span>}</div><p className="mt-1 text-sm text-white/65">{[profile?.area,profile?.location].filter(Boolean).join(' · ')||'Location not provided'}{profile?.joinedAt&&` · Joined ${new Date(profile.joinedAt).toLocaleDateString(undefined,{month:'short',year:'numeric'})}`}</p><p className="mt-2 flex items-center gap-2 text-sm text-white/75"><Star size={16} fill="#fbbf24" className="text-yellow-400"/>{rating.count?`${rating.average.toFixed(1)} out of 5 · ${rating.count} ${rating.count===1?'rating':'ratings'}`:'No ratings yet'}</p></div>
       <div className="flex gap-3 text-center"><div className="rounded-2xl bg-white/10 px-5 py-3"><p className="text-xl font-black">{activeListings.length}</p><p className="text-xs text-white/60">Active</p></div><div className="rounded-2xl bg-white/10 px-5 py-3"><p className="text-xl font-black">{soldListings.length}</p><p className="text-xs text-white/60">Sold</p></div></div>
     </section>
     <div className="mt-4 flex flex-wrap gap-2"><button disabled={relationshipBusy} onClick={toggleFollow} className="rounded-xl bg-teal px-4 py-2 text-sm font-bold text-white disabled:opacity-60">{relationshipBusy?'Saving…':following?'Following':'Follow seller'}</button><button onClick={()=>setShowReport(true)} className="rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-bold text-red-700">Report seller</button><button disabled={relationshipBusy} onClick={()=>setConfirmBlock(true)} className="rounded-xl border border-ink/10 bg-white px-4 py-2 text-sm font-bold text-ink/70 disabled:opacity-60">Block seller</button></div>
@@ -806,7 +824,7 @@ function Product({products,favorites,toggleFavorite,user}) {
         {product.tags?.length>0&&<div className="product-detail-tags">{product.tags.map(tag=><span key={tag}>#{tag}</span>)}</div>}
         <section className="seller-trust-panel">
           <div className="seller-trust-avatar">{sellerInfo?.avatar?<img src={sellerInfo.avatar} alt=""/>:<span>{(sellerInfo?.name||product.seller||'?').trim().split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase()}</span>}</div>
-          <div className="seller-trust-copy"><div className="seller-trust-name"><Link to={product.sellerId?`/seller/${product.sellerId}`:'#'} onClick={event=>{if(!product.sellerId)event.preventDefault()}}>{sellerInfo?.name||product.seller}</Link>{sellerInfo?.verified&&<span className="seller-verified"><BadgeCheck size={14}/>Verified account</span>}</div><p><Star size={14} fill="currentColor"/>{sellerRating.count?`${sellerRating.average.toFixed(1)} · ${sellerRating.count} ${sellerRating.count===1?'rating':'ratings'}`:'No ratings yet'}</p></div>
+          <div className="seller-trust-copy"><div className="seller-trust-name"><Link to={product.sellerId?`/seller/${product.sellerId}`:'#'} onClick={event=>{if(!product.sellerId)event.preventDefault()}}>{sellerInfo?.name||product.seller}</Link>{(sellerInfo?.emailVerified||sellerInfo?.phoneVerified)&&<span className="seller-verified"><BadgeCheck size={14}/>Verified contact</span>}</div><p><Star size={14} fill="currentColor"/>{sellerRating.count?`${sellerRating.average.toFixed(1)} · ${sellerRating.count} ${sellerRating.count===1?'rating':'ratings'}`:'No ratings yet'}</p></div>
           {product.sellerId&&<Link to={`/seller/${product.sellerId}`} className="seller-profile-link">View profile <ArrowRight size={14}/></Link>}
         </section>
         {sellerDataError&&<Notice kind="warning" className="mt-4">{sellerDataError}</Notice>}
@@ -888,7 +906,7 @@ function Sell({setProducts,user,selectedLocation,categoryData=categories}) {
         <section className={`listing-form-section ${dragging?'is-dragging':''}`} onDragOver={event=>{event.preventDefault();setDragging(true)}} onDragLeave={event=>{if(!event.currentTarget.contains(event.relatedTarget))setDragging(false)}} onDrop={event=>{event.preventDefault();setDragging(false);addImages(Array.from(event.dataTransfer.files||[]).filter(file=>file.type.startsWith('image/')))}} aria-labelledby="listing-photos-heading">
           <div className="listing-step"><span>01</span><div><h2 id="listing-photos-heading">Photos</h2><p>Good light and a clear view help your item stand out.</p></div><span className="listing-step-meta">{images.length} / 4</span></div>
           <label className="listing-upload-zone"><b>Drop photos here, or browse</b><span>Up to 4 images · compressed before upload · first photo is the cover</span><input required={images.length===0} type="file" accept="image/*" multiple onChange={imageUpload}/></label>
-          {images.length>0&&<div className="listing-photo-grid">{images.map((image,index)=><div key={`${index}-${image.slice(-16)}`} className="listing-photo-preview"><img src={image} alt={`Listing photo preview ${index+1}`}/>{index===0&&<span className="listing-photo-cover">Cover</span>}<button type="button" onClick={()=>setImages(current=>current.filter((_,photoIndex)=>photoIndex!==index))} aria-label={`Remove photo ${index+1}`}><X size={15}/></button></div>)}</div>}
+          {images.length>0&&<div className="listing-photo-grid">{images.map((image,index)=><div key={`${index}-${image.slice(-16)}`} className="listing-photo-preview"><img src={image} alt={`Listing photo preview ${index+1}`}/>{index===0?<span className="listing-photo-cover">Cover photo</span>:<button type="button" className="listing-photo-make-cover" onClick={()=>setImages(current=>{const selected=current[index];return [selected,...current.filter((_,photoIndex)=>photoIndex!==index)]})}>Make cover</button>}<button type="button" onClick={()=>setImages(current=>current.filter((_,photoIndex)=>photoIndex!==index))} aria-label={`Remove photo ${index+1}`}><X size={15}/></button></div>)}</div>}
         </section>
         <section className="listing-form-section">
           <div className="listing-step"><span>02</span><div><h2>Details</h2><p>Be specific so buyers know exactly what to expect.</p></div></div>
@@ -938,11 +956,19 @@ function Stat({icon:Icon,label,value,trend}){return <div className="seller-stat"
 function Profile({user,setUser,products,favorites}) { const [editing,setEditing]=useState(false); const [form,setForm]=useState({name:user?.name||'',phone:user?.phone||'',college:user?.college||'',area:user?.area||'',location:user?.location||''}); const [error,setError]=useState(''); const [saved,setSaved]=useState(false); useEffect(()=>setForm({name:user?.name||'',phone:user?.phone||'',college:user?.college||'',area:user?.area||'',location:user?.location||''}),[user]); const update=e=>setForm({...form,[e.target.name]:e.target.value}); const save=async e=>{e.preventDefault();setError('');try{const response=await fetch(`${API_BASE}/auth/me`,{method:'PUT',headers:{'Content-Type':'application/json',Authorization: `Bearer ${localStorage.getItem('campuskart-token')}`},body:JSON.stringify(form)});const data=await response.json();if(!response.ok)throw new Error(data.error||'Unable to update profile');setUser(data.user);localStorage.setItem('campuskart-user',JSON.stringify(data.user));setEditing(false);setSaved(true);setTimeout(()=>setSaved(false),2000)}catch(err){setError(err.message)}}; if(!user)return <div className="mx-auto max-w-2xl px-5 py-20 text-center"><h1 className="text-3xl font-black">Please log in to view your profile</h1><Link to="/login" className="mt-5 inline-block rounded-xl bg-teal px-5 py-3 font-bold text-white">Log in</Link></div>; const mine=products.filter(p=>p.sellerId===user.id||p.seller===user.name); return <div className="mx-auto max-w-5xl px-5 py-10"><div className="rounded-3xl bg-ink p-8 text-white"><div className="flex items-start gap-5"><div className="grid h-20 w-20 shrink-0 place-items-center rounded-full bg-coral text-2xl font-black">{user.name?.slice(0,2).toUpperCase()}</div><div className="min-w-0"><p className="text-white/60">Kargil Marketplace member</p><h1 className="text-3xl font-black">{user.name}</h1><p className="mt-1 text-sm text-white/70">{user.email || user.phone || 'Contact details not added'}</p><p className="text-sm text-white/60">{[user.college, user.area, user.location].filter(Boolean).join(' · ') || 'Add your location and area'}</p></div><button onClick={()=>setEditing(value=>!value)} className="ml-auto rounded-xl bg-white/10 px-4 py-2 text-sm font-bold">{editing?'Close':'Edit profile'}</button></div></div>{editing&&<form onSubmit={save} className="mt-6 grid gap-4 rounded-2xl bg-white p-6 shadow-sm sm:grid-cols-2"><input required name="name" value={form.name} onChange={update} placeholder="Full name"/><input name="phone" value={form.phone} onChange={update} placeholder="Phone number"/><input name="college" value={form.college} onChange={update} placeholder="College / organisation"/><input name="area" value={form.area} onChange={update} placeholder="Area / neighbourhood"/><input name="location" value={form.location} onChange={update} placeholder="City / location"/><button className="rounded-xl bg-teal py-3 font-bold text-white">Save changes</button>{error&&<p className="text-sm font-semibold text-red-600 sm:col-span-2">{error}</p>}{saved&&<p className="text-sm font-semibold text-teal sm:col-span-2">Profile updated successfully.</p>}</form>}<div className="mt-6 flex gap-3"><Link to="/my-listings" className="rounded-xl bg-teal px-4 py-3 text-sm font-bold text-white">My listings ({mine.length})</Link><Link to="/wishlist" className="rounded-xl bg-white px-4 py-3 text-sm font-bold shadow-sm">Wishlist ({favorites.length})</Link></div><div className="mt-8 grid gap-4 sm:grid-cols-3"><Stat icon={ShoppingBag} label="Active listings" value={mine.filter(p=>p.status!=='Sold').length} trend="Manage listings"/><Stat icon={Heart} label="Saved items" value={favorites.length} trend="Keep browsing"/><Stat icon={Star} label="Rating" value="New" trend="Build trust"/></div></div> }
 function Auth({mode,setUser}) {
   const nav=useNavigate()
+  const [params]=useSearchParams()
+  const oauthError=params.get('oauth_error')
   const [method,setMethod]=useState('email')
   const [showPassword,setShowPassword]=useState(false)
   const [form,setForm]=useState({name:'',email:'',phone:'',password:'',location:''})
   const [error,setError]=useState('')
   const [busy,setBusy]=useState(false)
+  useEffect(()=>{
+    if(!oauthError)return
+    localStorage.removeItem('campuskart-token')
+    localStorage.removeItem('campuskart-user')
+    setUser(null)
+  },[oauthError,setUser])
   const update=event=>setForm(current=>({...current,[event.target.name]:event.target.value}))
   const google=()=>{window.location.href=`${API_BASE}/auth/google`}
   const submit=async event=>{
@@ -961,6 +987,7 @@ function Auth({mode,setUser}) {
   return <div className="auth-page">
     <section className="auth-story"><img src="https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1400&q=82" alt="Mountain ridges in the Ladakh Himalaya"/><div className="auth-story-shade"/><Link to="/" className="auth-story-brand"><span>K</span>Kargil Marketplace</Link><div className="auth-story-copy"><p className="eyebrow">A marketplace close to home</p><h2>Good things<br/><em>find their way.</em></h2><p>Buy, sell and connect with people across Kargil and Ladakh.</p></div><span className="auth-story-caption">KARGIL · LADAKH</span></section>
     <section className="auth-panel"><div className="auth-panel-inner"><div className="auth-heading"><p className="eyebrow">{mode==='login'?'Welcome back':'Join the community'}</p><h1>{mode==='login'?'Sign in to continue':'Make yourself at home.'}</h1><p>{mode==='signup'?'Create an account to save listings and connect with local sellers.':'Your local marketplace is just ahead.'}</p></div>
+      {oauthError&&<Notice kind="warning" className="mb-4">{oauthErrorMessage(oauthError)||'Google sign-in could not be completed. Please try again.'}</Notice>}
       <button type="button" onClick={google} className="auth-google-button"><span>G</span>Continue with Google</button>
       <div className="auth-divider"><span>or continue with</span></div>
       <div className="auth-method-tabs" role="tablist" aria-label="Sign in method"><button type="button" role="tab" aria-selected={method==='email'} onClick={()=>setMethod('email')}>Email</button><button type="button" role="tab" aria-selected={method==='phone'} onClick={()=>setMethod('phone')}>Phone</button></div>
@@ -1031,7 +1058,7 @@ function Wishlist({products,favorites,toggleFavorite,user,loading=false,error=''
   const saved=products.filter(product=>favorites.includes(product.id))
   return <div className="wishlist-page mx-auto max-w-7xl px-5 py-10 lg:px-8"><div className="wishlist-heading"><div><p className="eyebrow">Saved for later</p><h1>Your collection.</h1><p>Your saved listings sync with your signed-in account.</p></div><span>{saved.length.toString().padStart(2,'0')} <i/> SAVED</span></div>{loading?<LoadingState message="Loading your saved listings" className="mt-8 rounded-xl border border-ink/5 bg-white p-8 text-sm text-ink/55"/>:error?<Notice kind="error" className="mt-8">Unable to load your wishlist: {error}<button onClick={onRetry} className="ml-3 underline">Try again</button></Notice>:saved.length?<div className="result-grid mt-9 grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4">{saved.map(product=><ProductCard key={product.id} product={product} favorite toggleFavorite={toggleFavorite}/>)}</div>:<div className="empty-state mt-10"><Heart size={30}/><h2>{user?'A little room for discovery.':'Your collection begins here.'}</h2><p>{user?'Tap the heart on any listing to save it for later.':'Sign in to keep your saved listings together.'}</p>{user?<Link to="/marketplace" className="text-link">Browse marketplace <ArrowRight size={15}/></Link>:<Link to="/login" className="text-link">Log in to continue <ArrowRight size={15}/></Link>}</div>}</div>
 }
-function AdminDashboard({products,setProducts,user,categoryData,setCategoryData}) {
+function LegacyAdminDashboard({products,setProducts,user,categoryData,setCategoryData}) {
   const [users,setUsers]=useState([])
   const [reports,setReports]=useState([])
   const [stats,setStats]=useState(null)
@@ -1151,7 +1178,7 @@ function AdminDashboard({products,setProducts,user,categoryData,setCategoryData}
   }
   if(user?.role!=='admin'&&!loading)return <div className="mx-auto max-w-2xl px-5 py-20 text-center"><ShieldAlert className="mx-auto text-amber-600" size={38}/><h1 className="mt-4 text-2xl font-black">Administrator access required</h1><p className="mt-2 text-sm text-ink/55">{error||'This account does not have permission to view marketplace administration.'}</p></div>
   const pending=reports.filter(report=>['Pending','Reviewing','pending','reviewed'].includes(report.status))
-  return <div className="mx-auto max-w-7xl px-4 py-8 sm:px-5 lg:px-8"><p className="text-sm font-bold uppercase tracking-widest text-teal">Marketplace moderation</p><h1 className="mt-2 text-3xl font-black sm:text-4xl">Admin dashboard</h1><p className="mt-2 text-sm text-ink/55">User and report data comes from the connected marketplace API.</p>{error&&<p role="alert" className="mt-5 rounded-xl bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</p>}
+  return <div className="mx-auto max-w-7xl px-4 py-8 sm:px-5 lg:px-8"><p className="text-sm font-bold uppercase tracking-widest text-teal">Marketplace moderation</p><h1 className="mt-2 text-3xl font-black sm:text-4xl">Admin dashboard</h1><p className="mt-2 text-sm text-ink/55">User and report data comes from the connected marketplace API.</p>{error&&<Notice kind="error" className="mt-5">{error}</Notice>}
     <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5"><Stat icon={UserRound} label="Users" value={loading?'…':stats?.users??users.length} trend="Registered"/><Stat icon={Package} label="Listings" value={stats?.listings??products.length} trend="Current"/><Stat icon={TrendingUp} label="Active listings" value={stats?.activeListings??products.filter(product=>!product.status||product.status==='Active').length} trend="Available"/><Stat icon={CheckCircle2} label="Sold items" value={stats?.soldProducts??products.filter(product=>product.status==='Sold').length} trend="Completed"/><Stat icon={Flag} label="Open reports" value={loading?'…':stats?.reports??pending.length} trend="Needs review"/></div>
     <section className="mt-8 rounded-2xl bg-white p-5 shadow-sm"><div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-black">Reported listings & sellers</h2><p className="mt-1 text-sm text-ink/50">Review reports submitted by authenticated users.</p></div><button onClick={()=>{setLoading(true);load()}} className="rounded-xl border px-4 py-2 text-sm font-bold">Refresh</button></div>
       {loading?<div className="mt-5 space-y-3">{[1,2,3].map(item=><div key={item} className="skeleton h-16 rounded-xl"/>)}</div>:pending.length?<div className="mt-4 space-y-3">{pending.map(report=><article key={report.id} className="rounded-xl border border-ink/5 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><span className="rounded-full bg-orange-50 px-2 py-1 text-xs font-bold text-orange-800">{report.targetType} · {report.status}</span><h3 className="mt-2 font-bold">{report.targetName}</h3><p className="mt-1 text-sm text-ink/60">{report.reason}{report.details&&` — ${report.details}`}</p><p className="mt-1 text-xs text-ink/40">{new Date(report.createdAt).toLocaleString()}</p></div><div className="flex flex-wrap gap-2">{report.targetType==='listing'&&<button disabled={busyId===report.id} onClick={()=>requestReportAction(report,'remove')} className="rounded-lg bg-red-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">Remove listing</button>}{report.targetType!=='listing'&&<button disabled={busyId===report.id} onClick={()=>requestReportAction(report,'block')} className="rounded-lg bg-red-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">Ban reported user</button>}<button disabled={busyId===report.id} onClick={()=>resolveReport(report,'Reviewing')} className="rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-60">Review</button><button disabled={busyId===report.id} onClick={()=>resolveReport(report,'Resolved')} className="rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-60">Resolve</button><button disabled={busyId===report.id} onClick={()=>resolveReport(report,'Rejected')} className="rounded-lg border px-3 py-2 text-xs font-bold text-red-700 disabled:opacity-60">Reject report</button></div></div></article>)}</div>:<p className="mt-5 rounded-xl bg-cream p-5 text-sm text-ink/55">{loading?'Loading reports…':'No open reports.'}</p>}</section>
@@ -1161,9 +1188,14 @@ function AdminDashboard({products,setProducts,user,categoryData,setCategoryData}
     {confirmation&&<ConfirmDialog title={confirmation.title} message={confirmation.message} confirmLabel={confirmation.confirmLabel} tone={confirmation.tone} busy={confirmBusy} onCancel={()=>setConfirmation(null)} onConfirm={async()=>{setConfirmBusy(true);await confirmation.run();setConfirmBusy(false);setConfirmation(null)}}/>}
   </div>
 }
-function Admin({products,setProducts}) { return <AdminDashboard products={products} setProducts={setProducts} user={null}/> }
+function Admin({products,setProducts}) { return <LegacyAdminDashboard products={products} setProducts={setProducts} user={null}/> }
 function Shops({user,categoryData=categories}) {
   const [shops,setShops]=useState([])
+  const [myShops,setMyShops]=useState([])
+  const [ownerError,setOwnerError]=useState('')
+  const [ownerBusy,setOwnerBusy]=useState(false)
+  const [editingShop,setEditingShop]=useState('')
+  const [shopEditDraft,setShopEditDraft]=useState(null)
   const [loading,setLoading]=useState(true)
   const [loadError,setLoadError]=useState('')
   const [loadRetry,setLoadRetry]=useState(0)
@@ -1188,6 +1220,14 @@ function Shops({user,categoryData=categories}) {
     finally{setLoading(false)}
   }
   useEffect(()=>{loadShops()},[loadRetry])
+  useEffect(()=>{
+    if(!user||!token){setMyShops([]);setOwnerError('');return}
+    let active=true
+    fetch(`${API_BASE}/shops/mine`,{headers:authorization()}).then(readApiResponse).then(records=>{
+      if(active){setMyShops(records);setOwnerError('')}
+    }).catch(err=>{if(active)setOwnerError(err.message||'Unable to load your shop submissions.')})
+    return ()=>{active=false}
+  },[user?.id,loadRetry])
   const addShop=async event=>{
     event.preventDefault()
     setError('');setNotice('')
@@ -1196,12 +1236,26 @@ function Shops({user,categoryData=categories}) {
     try{
       const response=await fetch(`${API_BASE}/shops`,{method:'POST',headers:{...authorization(),'Content-Type':'application/json'},body:JSON.stringify(shopForm)})
       const created=await readApiResponse(response)
-      setShops(current=>[created,...current])
+      setMyShops(current=>[created,...current])
       setShopForm({name:'',category:'General store',location:'Kargil',contactNumber:'',description:''})
       setShowShopForm(false)
-      setNotice('Your shop is listed. Add available goods so customers can browse them.')
+      setNotice('Your shop submission is pending review. It will appear publicly after approval.')
     }catch(err){setError(err.message||'Could not add this shop. Please try again.')}
     finally{setBusy(false)}
+  }
+  const saveShopDetails=async event=>{
+    event.preventDefault()
+    if(!editingShop||!shopEditDraft)return
+    setOwnerBusy(true);setOwnerError('')
+    try{
+      const response=await fetch(`${API_BASE}/shops/${encodeURIComponent(editingShop)}`,{method:'PUT',headers:{...authorization(),'Content-Type':'application/json'},body:JSON.stringify(shopEditDraft)})
+      const updated=await readApiResponse(response)
+      setMyShops(current=>current.map(shop=>shop.id===updated.id?updated:shop))
+      setEditingShop('');setShopEditDraft(null)
+      setNotice(updated.approvalStatus==='pending'?'Your corrected shop details were resubmitted for review.':'Your shop details were saved.')
+      setLoadRetry(value=>value+1)
+    }catch(err){setOwnerError(err.message||'Unable to save your shop details.')}
+    finally{setOwnerBusy(false)}
   }
   const addInventoryItem=async event=>{
     event.preventDefault()
@@ -1235,8 +1289,8 @@ function Shops({user,categoryData=categories}) {
     </section>
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-5 lg:px-8">
     <div className="shop-list-heading"><div><p className="eyebrow">Around Kargil</p><h2 className="editorial-heading">Meet the neighbourhood.</h2></div><p>Register a shop, then share its available inventory with the community.</p></div>
-    {error&&<p role="alert" className="mt-5 rounded-xl bg-red-50 p-4 text-sm font-semibold text-red-700">{error}{!user&&<Link to="/login" className="ml-2 underline">Log in</Link>}</p>}
-    {notice&&<p role="status" className="mt-5 rounded-xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">{notice}</p>}
+    {error&&<Notice kind="error" className="mt-5">{error}{!user&&<Link to="/login" className="ml-2 underline">Log in</Link>}</Notice>}
+    {notice&&<Notice kind="success" className="mt-5">{notice}</Notice>}
     {showShopForm&&<form onSubmit={addShop} className="mt-6 grid gap-3 rounded-2xl bg-white p-5 shadow-sm sm:grid-cols-2">
       <h2 className="text-xl font-black sm:col-span-2">Register your shop</h2>
       <input required maxLength="120" value={shopForm.name} onChange={event=>setShopForm(current=>({...current,name:event.target.value}))} placeholder="Shop name"/>
@@ -1247,13 +1301,22 @@ function Shops({user,categoryData=categories}) {
       <button disabled={busy||!user} className="min-h-11 rounded-xl bg-teal px-4 py-3 font-bold text-white disabled:opacity-50 sm:col-span-2">{busy?'Adding shop…':'Add shop'}</button>
       {!user&&<p className="text-sm text-ink/55 sm:col-span-2">You need to log in before registering a shop. Shop changes are saved to the marketplace database.</p>}
     </form>}
-    {loadError&&!loading&&<div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900"><span>Unable to load local shops: {loadError}</span><button type="button" onClick={()=>setLoadRetry(value=>value+1)} className="rounded-lg bg-amber-800 px-3 py-2 text-white">Try again</button></div>}
+    {user&&<section aria-label="Your shop submissions" className="mt-7 rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
+      <h2 className="text-xl font-semibold">Your shop submissions</h2><p className="mt-1 text-sm text-ink/55">New shops are reviewed before appearing in the public directory.</p>
+      {ownerError&&<Notice kind="error" className="mt-3">{ownerError}</Notice>}
+      {myShops.length? <div className="mt-4 divide-y divide-ink/5">{myShops.map(shop=><article key={shop.id} className="py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">{shop.name}</h3><p className="text-sm text-ink/55">{shop.category} · {shop.location}</p></div><span className="rounded-full bg-cream px-3 py-1 text-xs font-semibold">{shop.approvalStatus==='legacy'?'Legacy · publicly visible':shop.approvalStatus}</span></div>
+        {shop.approvalStatus==='rejected'&&shop.rejectionReason&&<p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">Review reason: {shop.rejectionReason}</p>}
+        {editingShop===shop.id&&shopEditDraft?<form onSubmit={saveShopDetails} className="mt-4 grid gap-3 sm:grid-cols-2"><input required maxLength={120} aria-label="Shop name" value={shopEditDraft.name} onChange={event=>setShopEditDraft(current=>({...current,name:event.target.value}))} className="rounded-xl border px-3 py-2.5"/><input required maxLength={80} aria-label="Shop category" value={shopEditDraft.category} onChange={event=>setShopEditDraft(current=>({...current,category:event.target.value}))} className="rounded-xl border px-3 py-2.5"/><input required maxLength={120} aria-label="Shop location" value={shopEditDraft.location} onChange={event=>setShopEditDraft(current=>({...current,location:event.target.value}))} className="rounded-xl border px-3 py-2.5"/><input maxLength={30} aria-label="Shop contact number" value={shopEditDraft.contactNumber||''} onChange={event=>setShopEditDraft(current=>({...current,contactNumber:event.target.value}))} className="rounded-xl border px-3 py-2.5"/><textarea required maxLength={1000} aria-label="Shop description" value={shopEditDraft.description} onChange={event=>setShopEditDraft(current=>({...current,description:event.target.value}))} className="rounded-xl border px-3 py-2.5 sm:col-span-2"/><div className="flex gap-2 sm:col-span-2"><button disabled={ownerBusy} className="button-dark px-4 py-2.5 text-sm">{ownerBusy?'Saving…':'Save corrections'}</button><button type="button" onClick={()=>{setEditingShop('');setShopEditDraft(null)}} className="button-outline px-4 py-2.5 text-sm">Cancel</button></div></form>:<button type="button" onClick={()=>{setEditingShop(shop.id);setShopEditDraft({name:shop.name,category:shop.category,location:shop.location,contactNumber:shop.contactNumber||'',description:shop.description})}} className="button-outline mt-3 px-3 py-2 text-xs">{shop.approvalStatus==='rejected'?'Correct and resubmit':'Edit shop details'}</button>}
+      </article>)}</div>:<p className="mt-4 text-sm text-ink/50">You have not submitted a shop.</p>}
+    </section>}
+    {loadError&&!loading&&<Notice kind="warning" className="mt-5">Unable to load local shops: {loadError}<button type="button" onClick={()=>setLoadRetry(value=>value+1)} className="ml-3 underline">Try again</button></Notice>}
     {loading?<div className="mt-8 grid gap-5 md:grid-cols-2">{[1,2].map(item=><div key={item} className="skeleton h-64 rounded-2xl bg-white"/> )}</div>
     :shops.length?<div className="mt-8 grid gap-5 lg:grid-cols-2">{shops.map(shop=>{
       const products=shop.products||[]
       const manages=Boolean(user&&shop.ownerId===user.id)
       return       <article key={shop.id} className="shop-record">
-        <div className="shop-record-head"><div className="min-w-0"><p className="eyebrow">LOCAL BUSINESS</p><h3>{shop.name}</h3><p className="shop-location"><MapPin size={15}/>{shop.location}</p>{shop.contactNumber&&<a href={`tel:${shop.contactNumber}`} className="shop-phone">{shop.contactNumber}</a>}</div><span className="shop-category">{shop.category}</span></div>
+        <div className="shop-record-head"><div className="min-w-0"><p className="eyebrow">LOCAL BUSINESS</p><div className="flex flex-wrap items-center gap-2"><h3>{shop.name}</h3>{shop.verified&&<span className="seller-verified"><BadgeCheck size={13}/>Verified business</span>}</div><p className="shop-location"><MapPin size={15}/>{shop.location}</p>{shop.contactNumber&&<a href={`tel:${shop.contactNumber}`} className="shop-phone">{shop.contactNumber}</a>}</div><span className="shop-category">{shop.category}</span></div>
         <p className="shop-description">{shop.description}</p>
         <div className="shop-inventory-heading"><h4>Available goods <span>({products.length})</span></h4>{manages&&<button type="button" onClick={()=>{setItemShopId(current=>current===shop.id?'':shop.id);setError('')}} className="button-outline inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold"><Plus size={14}/>Add goods</button>}</div>
         {manages&&itemShopId===shop.id&&<form onSubmit={addInventoryItem} className="shop-inventory-form mt-3 grid gap-2 sm:grid-cols-2">
@@ -1276,11 +1339,16 @@ function Shops({user,categoryData=categories}) {
 }
 function Hotels({user}) {
   const [hotels, setHotels] = useState([])
+  const [myHotels, setMyHotels] = useState([])
   const [loading, setLoading] = useState(true)
   const [retry, setRetry] = useState(0)
   const [showForm, setShowForm] = useState(false)
+  const [editingHotel, setEditingHotel] = useState('')
+  const [busy, setBusy] = useState(false)
   const [form, setForm] = useState({ name: '', category: 'Hotel & restaurant', location: '', contactNumber: '', description: '', rooms: '', foods: '' })
   const [error, setError] = useState('')
+  const [ownerError, setOwnerError] = useState('')
+  const [notice, setNotice] = useState('')
   useEffect(() => {
     let active=true
     setLoading(true)
@@ -1291,10 +1359,21 @@ function Hotels({user}) {
       .finally(()=>{if(active)setLoading(false)})
     return ()=>{active=false}
   },[retry])
+  useEffect(()=>{
+    const token=localStorage.getItem('campuskart-token')
+    if(!user||!token){setMyHotels([]);setOwnerError('');return}
+    let active=true
+    fetch(`${API_BASE}/hotels/mine`,{headers:{Authorization:`Bearer ${token}`}}).then(readApiResponse).then(records=>{
+      if(active){setMyHotels(records);setOwnerError('')}
+    }).catch(loadError=>{if(active)setOwnerError(loadError.message||'Unable to load your hotel submissions.')})
+    return ()=>{active=false}
+  },[user?.id,retry])
   const update = event => setForm({ ...form, [event.target.name]: event.target.value })
   const addHotel = async event => {
     event.preventDefault()
     setError('')
+    setNotice('')
+    setBusy(true)
     const hotel = {
       ...form,
       rooms: form.rooms.split(',').filter(Boolean).map(room => ({ type: room.trim(), price: 0, available: 0 })),
@@ -1307,12 +1386,42 @@ function Hotels({user}) {
         body: JSON.stringify(hotel)
       })
       const data = await readApiResponse(response)
-      setHotels(current => [...current, data])
+      setMyHotels(current => [data,...current])
       setForm({ name: '', category: 'Hotel & restaurant', location: '', contactNumber: '', description: '', rooms: '', foods: '' })
       setShowForm(false)
+      setNotice('Your hotel submission is pending review. It will appear publicly after approval.')
     } catch (err) {
       setError(err.message)
+    } finally { setBusy(false) }
+  }
+  const editHotel = hotel=>{
+    setEditingHotel(hotel.id)
+    setForm({
+      name:hotel.name||'',category:hotel.category||'',location:hotel.location||'',contactNumber:hotel.contactNumber||'',
+      description:hotel.description||'',rooms:(hotel.rooms||[]).map(room=>room.type).join(', '),foods:(hotel.foods||[]).join(', ')
+    })
+    setShowForm(true)
+  }
+  const saveHotel = async event=>{
+    event.preventDefault()
+    setError('');setNotice('');setBusy(true)
+    const payload={
+      ...form,
+      rooms:form.rooms.split(',').filter(Boolean).map(room=>({type:room.trim(),price:0,available:0})),
+      foods:form.foods.split(',').map(food=>food.trim()).filter(Boolean)
     }
+    try{
+      const token=localStorage.getItem('campuskart-token')
+      const response=await fetch(`${API_BASE}/hotels/${encodeURIComponent(editingHotel)}`,{
+        method:'PUT',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(payload)
+      })
+      const updated=await readApiResponse(response)
+      setMyHotels(current=>current.map(hotel=>hotel.id===updated.id?updated:hotel))
+      setEditingHotel('');setShowForm(false)
+      setNotice(updated.approvalStatus==='pending'?'Your corrected hotel details were resubmitted for review.':'Your hotel details were saved.')
+      setRetry(value=>value+1)
+    }catch(err){setError(err.message||'Unable to save hotel details.')}
+    finally{setBusy(false)}
   }
   return <div className="hotel-page">
     <section className="hotel-masthead">
@@ -1326,12 +1435,14 @@ function Hotels({user}) {
     </section>
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-5 lg:px-8">
       <div className="hotel-list-heading"><div><p className="eyebrow">A place to rest</p><h2 className="editorial-heading">Local stays, thoughtfully found.</h2></div><p>Explore room details, what’s on the menu, and contact each place directly.</p></div>
-      {showForm && user && <form onSubmit={addHotel} className="hotel-form mt-8 grid gap-4 sm:grid-cols-2"><h3 className="text-2xl font-black sm:col-span-2">Introduce your hotel</h3><input required maxLength="120" name="name" value={form.name} onChange={update} placeholder="Hotel name"/><input required maxLength="80" name="category" value={form.category} onChange={update} placeholder="Category"/><input required maxLength="120" name="location" value={form.location} onChange={update} placeholder="Location"/><input required maxLength="30" name="contactNumber" value={form.contactNumber} onChange={update} placeholder="Contact number"/><input required maxLength="1000" name="rooms" value={form.rooms} onChange={update} placeholder="Rooms, separated by commas"/><input required maxLength="4000" name="foods" value={form.foods} onChange={update} placeholder="Foods, separated by commas"/><textarea required maxLength="1500" name="description" value={form.description} onChange={update} placeholder="Hotel description" className="sm:col-span-2"/>{error && <p role="alert" className="text-sm font-semibold text-red-600 sm:col-span-2">{error}</p>}<button className="button-dark py-3 font-semibold sm:col-span-2">Save hotel</button></form>}
-      {error&&<div role="alert" className="api-error mt-5 flex flex-wrap items-center justify-between gap-3 p-4 text-sm font-semibold"><span>{error}</span><button onClick={()=>setRetry(value=>value+1)} className="button-outline px-3 py-2">Retry loading</button></div>}
+      {notice&&<Notice kind="success" className="mt-5">{notice}</Notice>}
+      {showForm && user && <form onSubmit={editingHotel?saveHotel:addHotel} className="hotel-form mt-8 grid gap-4 sm:grid-cols-2"><h3 className="text-2xl font-black sm:col-span-2">{editingHotel?'Update your hotel submission':'Introduce your hotel'}</h3><input required maxLength="120" name="name" value={form.name} onChange={update} placeholder="Hotel name"/><input required maxLength="80" name="category" value={form.category} onChange={update} placeholder="Category"/><input required maxLength="120" name="location" value={form.location} onChange={update} placeholder="Location"/><input required maxLength="30" name="contactNumber" value={form.contactNumber} onChange={update} placeholder="Contact number"/><input required maxLength="1000" name="rooms" value={form.rooms} onChange={update} placeholder="Rooms, separated by commas"/><input required maxLength="4000" name="foods" value={form.foods} onChange={update} placeholder="Foods, separated by commas"/><textarea required maxLength="1500" name="description" value={form.description} onChange={update} placeholder="Hotel description" className="sm:col-span-2"/>{error && <Notice kind="error" className="sm:col-span-2">{error}</Notice>}<div className="flex gap-2 sm:col-span-2"><button disabled={busy} className="button-dark py-3 font-semibold">{busy?'Saving…':editingHotel?'Save corrections':'Submit hotel for review'}</button>{editingHotel&&<button type="button" onClick={()=>{setEditingHotel('');setShowForm(false)}} className="button-outline px-4 py-3 text-sm">Cancel</button>}</div></form>}
+      {user&&<section aria-label="Your hotel submissions" className="mt-7 rounded-2xl border border-ink/10 bg-white p-5 shadow-sm"><h2 className="text-xl font-semibold">Your hotel submissions</h2><p className="mt-1 text-sm text-ink/55">New hotels are reviewed before appearing in the public directory.</p>{ownerError&&<Notice kind="error" className="mt-3">{ownerError}</Notice>}{myHotels.length?<div className="mt-4 divide-y divide-ink/5">{myHotels.map(hotel=><article key={hotel.id} className="py-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">{hotel.name}</h3><p className="text-sm text-ink/55">{hotel.category} · {hotel.location}</p></div><span className="rounded-full bg-cream px-3 py-1 text-xs font-semibold">{hotel.approvalStatus==='legacy'?'Legacy · publicly visible':hotel.approvalStatus}</span></div>{hotel.approvalStatus==='rejected'&&hotel.rejectionReason&&<p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">Review reason: {hotel.rejectionReason}</p>}<button type="button" onClick={()=>editHotel(hotel)} className="button-outline mt-3 px-3 py-2 text-xs">{hotel.approvalStatus==='rejected'?'Correct and resubmit':'Edit hotel details'}</button></article>)}</div>:!ownerError?<p className="mt-4 text-sm text-ink/50">You have not submitted a hotel.</p>:null}</section>}
+      {error&&<Notice kind="error" className="mt-5">{error}<button onClick={()=>setRetry(value=>value+1)} className="ml-3 underline">Retry loading</button></Notice>}
       {loading?<p role="status" className="hotel-loading mt-10 p-10 text-center">Loading hotel listings…</p>:!hotels.length&&!error?<p className="hotel-empty mt-10 p-12 text-center">No hotel listings are available yet.</p>:null}
       <div className="hotel-list mt-8">{hotels.map((hotel,index)=><article key={hotel.id} className="hotel-record" data-reveal>
         <div className="hotel-record-index">0{index+1}</div>
-        <div className="hotel-record-main"><div className="hotel-record-title"><div><p className="eyebrow">{hotel.category}</p><h3>{hotel.name}</h3></div><span className="hotel-location"><MapPin size={15}/>{hotel.location}</span></div><p className="hotel-description">{hotel.description}</p>
+        <div className="hotel-record-main"><div className="hotel-record-title"><div><p className="eyebrow">{hotel.category}</p><div className="flex flex-wrap items-center gap-2"><h3>{hotel.name}</h3>{hotel.verified&&<span className="seller-verified"><BadgeCheck size={13}/>Verified business</span>}</div></div><span className="hotel-location"><MapPin size={15}/>{hotel.location}</span></div><p className="hotel-description">{hotel.description}</p>
           <div className="hotel-details-grid"><div><h4>Rooms</h4>{(hotel.rooms||[]).length?<div className="hotel-rooms">{hotel.rooms.map(room=><div key={room.type} className="hotel-room"><b>{room.type}</b><span>{formatINR(room.price)} / night</span><small>{room.available} available</small></div>)}</div>:<p className="hotel-detail-empty">Contact the hotel for room details.</p>}</div><div><h4>Food & dining</h4>{(hotel.foods||[]).length?<div className="hotel-foods">{hotel.foods.map(food=><span key={food}>{food}</span>)}</div>:<p className="hotel-detail-empty">Contact the hotel for menu details.</p>}</div></div>
         </div>
         <div className="hotel-record-action"><a href={`tel:${hotel.contactNumber}`} className="hotel-call-link"><span><small>CALL TO ENQUIRE</small><b>{hotel.contactNumber}</b></span><ArrowRight size={18}/></a></div>
@@ -1339,9 +1450,31 @@ function Hotels({user}) {
     </div>
   </div>
 }
-function AuthCallback({setUser}) { const [params]=useSearchParams(); const nav=useNavigate(); useEffect(()=>{ const token=params.get('token'); if(!token){nav('/login');return} localStorage.setItem('campuskart-token',token); fetch(`${API_BASE}/me`,{headers:{Authorization:`Bearer ${token}`}}).then(r=>r.json()).then(data=>{ if(data.user){localStorage.setItem('campuskart-user',JSON.stringify(data.user));setUser(data.user);nav('/profile')} else nav('/login') }).catch(()=>nav('/login')) },[nav,params,setUser]); return <div className="mx-auto max-w-md px-5 py-20 text-center">Signing you in?</div> }
 function About(){return <div className="mx-auto max-w-5xl px-5 py-12 lg:px-8"><div className="rounded-3xl bg-ink p-8 text-white sm:p-12"><p className="text-sm font-bold uppercase tracking-widest text-mint">About Kargil Marketplace</p><h1 className="mt-3 text-4xl font-black sm:text-5xl">Built for local buying and selling.</h1><p className="mt-5 max-w-2xl text-lg leading-relaxed text-white/70">Kargil Marketplace is a local digital marketplace created to make it easier for people in Kargil to discover products, support nearby shops, and buy or sell useful goods with confidence.</p></div><div className="mt-8 grid gap-6 md:grid-cols-2"><article className="rounded-2xl bg-white p-7 shadow-sm"><p className="text-sm font-bold uppercase tracking-widest text-teal">Created by</p><h2 className="mt-3 text-2xl font-black">Nassir Hussain</h2><p className="mt-3 leading-relaxed text-ink/65">Nassir Hussain created Kargil Marketplace as a practical local-commerce project for connecting customers, independent sellers, and shops through one simple platform.</p></article><article className="rounded-2xl bg-white p-7 shadow-sm"><p className="text-sm font-bold uppercase tracking-widest text-teal">Our goal</p><h2 className="mt-3 text-2xl font-black">Local goods, shared simply.</h2><p className="mt-3 leading-relaxed text-ink/65">The platform is designed to help local businesses present their available goods online, help people find products nearby, and create a stronger digital marketplace for Kargil.</p></article></div><div className="mt-8 rounded-2xl border border-teal/10 bg-mint/50 p-7"><h2 className="text-2xl font-black">What you can do here</h2><div className="mt-5 grid gap-3 text-sm text-ink/70 sm:grid-cols-3"><span>Browse local products</span><span>Discover nearby shops</span><span>List items for sale</span><span>Save products</span><span>Contact sellers</span><span>Explore shop goods</span></div></div></div>}
 function Footer(){return <footer className="editorial-footer"><div className="editorial-footer-inner mx-auto max-w-7xl px-5 lg:px-8"><div className="footer-topline"><span>ROOTED IN KARGIL. OPEN TO EVERYONE HERE.</span><span>BUY · SELL · CONNECT LOCALLY</span></div><div className="footer-main"><div className="footer-brand"><Link to="/" className="footer-wordmark">Kargil<span>.</span></Link><p>A more thoughtful way to find, share, and support what’s close to home.</p><Link to="/marketplace" className="footer-cta">Explore the marketplace <ArrowRight size={16}/></Link></div><div className="footer-link-group"><p>DISCOVER</p><Link to="/marketplace">Marketplace</Link><Link to="/shops">Local shops</Link><Link to="/hotels">Hotels & stays</Link></div><div className="footer-link-group"><p>COMMUNITY</p><Link to="/sell">List an item</Link><Link to="/about">About & help</Link><Link to="/#safety">Safety tips</Link></div></div><div className="footer-bottom"><span>© {new Date().getFullYear()} Kargil Marketplace</span><span>Made for our local community.</span></div></div></footer>}
+function EditorialAbout() {
+  return <div className="editorial-about">
+    <section className="editorial-about-hero"><p className="eyebrow">Local by nature · Kargil & Ladakh</p><h1>Closer to what<br/><em>matters locally.</em></h1><p>A thoughtful place to find useful things, share what you no longer need, and discover independent shops and stays across the region.</p><Link to="/marketplace" className="button-light px-5 py-3 text-sm font-semibold">Explore the marketplace <ArrowRight size={16}/></Link><span className="editorial-about-index">01 / COMMUNITY</span></section>
+    <section className="editorial-about-story"><div><p className="eyebrow">Made for nearby connection</p><h2>One local place.<br/><em>Many ways to connect.</em></h2></div><p>Kargil Marketplace brings together individual listings, local shop inventory and hotel information while keeping those experiences distinct. Browse as a guest, or create an account to save items, contact sellers and manage your own listings.</p></section>
+    <section className="editorial-about-links"><Link to="/shops"><span>01</span><strong>Independent shops</strong><ArrowRight size={17}/></Link><Link to="/hotels"><span>02</span><strong>Hotels & stays</strong><ArrowRight size={17}/></Link><Link to="/sell"><span>03</span><strong>List something useful</strong><ArrowRight size={17}/></Link></section>
+  </div>
+}
+function TrustDocument({kind}) {
+  const privacy=kind==='privacy'
+  const sections=privacy?[
+    ['Information used by the marketplace','Account information can include your name, email address, phone number, profile details and sign-in provider identifiers. Google sign-in returns account details permitted by Google, such as name, email and profile image. Listings can include descriptions, photos, prices, categories, locations and optional coordinates. Conversations, ratings and reports are stored to provide their respective marketplace features.'],
+    ['How information is used','The service uses this information to authenticate accounts, publish and manage listings, show local results, support buyer-seller conversations, handle reports and operate account features. Public seller and listing responses omit private account fields; exact listing coordinates are not included in public product responses.'],
+    ['Storage and service providers','Marketplace records are stored in the configured MongoDB database. The browser stores the authentication token and a display copy of the signed-in profile in local storage. Google handles Google authentication. Email and SMS verification may be routed through Resend or Twilio when those providers are configured. Their own terms and privacy notices apply to their services.'],
+    ['Choices and retention','You can edit profile details, remove listings you control and sign out to clear the browser’s current authentication state. Some records, such as conversations, reports or account-related data, may remain in the service database when required to operate the marketplace. The current application does not provide self-service account deletion.']
+  ]:[
+    ['Using the marketplace','Use an accurate account and provide truthful, lawful listing descriptions, prices, condition and location details. Do not post unlawful, unsafe, misleading or prohibited content, impersonate others, harass users, or misuse contact information.'],
+    ['Buying and selling','Listings are offers from their respective users or businesses. Buyers and sellers are responsible for confirming an item, its condition, price, availability and meeting arrangements directly. The current service does not process payments, provide escrow, arrange delivery or reserve hotel rooms. Room counts shown by a hotel are information supplied in its listing, not a booking guarantee.'],
+    ['Accounts and content','You are responsible for activity carried out through your account and for having the rights needed to submit listing text and images. The marketplace may restrict or remove content or accounts that violate these terms or applicable requirements.'],
+    ['Service limits','The marketplace helps people discover and contact one another; it does not guarantee the accuracy of user-submitted content, a transaction outcome, seller identity beyond the account verification signals shown, or uninterrupted service. Use care and inspect goods before paying.']
+  ]
+  return <div className="trust-document mx-auto max-w-5xl px-5 py-12 lg:px-8"><header><p className="eyebrow">Kargil Marketplace · {privacy?'Your information':'Community guidelines'}</p><h1>{privacy?'Privacy overview':'Terms of use'}</h1><p>{privacy?'A plain-language summary of the information the current product handles.':'Guidelines for using listings, shops, hotels and marketplace communication.'}</p></header><div className="trust-document-sections">{sections.map(([title,body],index)=><section key={title}><span>{String(index+1).padStart(2,'0')}</span><div><h2>{title}</h2><p>{body}</p></div></section>)}</div><p className="trust-document-note">These pages describe the application’s current behavior and are not legal advice. Have the terms and privacy information reviewed for your operating jurisdiction before relying on them as formal legal documents.</p></div>
+}
+function LegalFooterLinks(){return <nav className="legal-footer-links" aria-label="Legal information"><Link to="/privacy">Privacy</Link><Link to="/terms">Terms of use</Link></nav>}
 function Messages({user}) {
   const [searchParams,setSearchParams]=useSearchParams()
   const nav=useNavigate()
@@ -1438,7 +1571,7 @@ function Messages({user}) {
   return <div className="mx-auto max-w-6xl px-4 py-8 sm:px-5 lg:px-8">
     <h1 className="text-3xl font-black sm:text-4xl">Messages</h1>
     <p className="mt-2 text-ink/55">Talk directly with buyers and sellers, and negotiate a fair price.</p>
-    {error&&<p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}
+    {error&&<Notice kind="error" className="mt-4">{error}</Notice>}
     <div className="mt-8 grid min-h-[520px] overflow-hidden rounded-2xl bg-white shadow-sm md:grid-cols-[300px_1fr]">
       <aside className="border-b md:border-b-0 md:border-r">
         <div className="border-b p-4 font-bold">Conversations ({conversations.length}){unreadTotal>0&&<span className="ml-2 rounded-full bg-coral px-2 py-1 text-xs text-white">{unreadTotal} unread</span>}</div>

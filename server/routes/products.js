@@ -6,6 +6,8 @@ import Category from '../models/Category.js'
 import User from '../models/User.js'
 import Shop from '../models/Shop.js'
 import mongoose from 'mongoose'
+import { requireAdmin } from '../middleware/admin.js'
+import { escapeRegex, hasInvalidAdminStrings, paginatedResult, parseAdminPage } from '../lib/adminQueries.js'
 const router = Router()
 const validImage = image => typeof image === 'string' && image.length <= 5 * 1024 * 1024 &&
   (/^https?:\/\/\S+$/i.test(image) || /^data:image\/(?:jpeg|png|webp);base64,[a-z\d+/]+=*$/i.test(image))
@@ -24,11 +26,31 @@ const publicProduct = product => {
   delete value._id
   return value
 }
-router.get('/moderation/all', requireAuth, async (req, res, next) => {
+router.get('/moderation/all', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' })
     if (!isMongoReady()) return res.status(503).json({ error: 'Listing moderation requires the marketplace database.' })
-    res.json((await Product.find().lean()).map(stripMongo))
+    const page = parseAdminPage(req.query)
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : ''
+    const status = typeof req.query.status === 'string' ? req.query.status : 'all'
+    const category = typeof req.query.category === 'string' ? req.query.category.trim() : ''
+    if (!page || hasInvalidAdminStrings(req.query, ['q', 'status', 'category']) || q.length > 120 || category.length > 80 ||
+        !['all', 'Active', 'Sold', 'Rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid listing moderation filters or pagination.' })
+    }
+    const conditions = []
+    if (status === 'Active') conditions.push({ status: { $in: ['Active', null] } })
+    else if (status !== 'all') conditions.push({ status })
+    if (category) conditions.push({ category })
+    if (q) {
+      const expression = new RegExp(escapeRegex(q), 'i')
+      conditions.push({ $or: [{ title: expression }, { seller: expression }, { location: expression }] })
+    }
+    const filter = conditions.length ? { $and: conditions } : {}
+    const [records, total] = await Promise.all([
+      Product.find(filter).sort({ createdAt: -1, _id: -1 }).skip(page.skip).limit(page.pageSize).lean(),
+      Product.countDocuments(filter)
+    ])
+    res.json(paginatedResult(records.map(stripMongo), total, page))
   } catch (error) { next(error) }
 })
 router.get('/', async (req, res, next) => {
@@ -37,8 +59,17 @@ router.get('/', async (req, res, next) => {
     if (req.query.shopId) filter.shopId = req.query.shopId
     if (req.query.sellerId) filter.sellerId = req.query.sellerId
     if (!isMongoReady()) return res.status(503).json({ error: 'Listings are unavailable until the marketplace database is connected.' })
-    const suspendedSellerIds = (await User.find({ $or: [{ blocked: true }, { status: { $in: ['suspended', 'banned'] } }] }).distinct('_id')).map(String)
-    filter.sellerId = { ...(filter.sellerId ? { $eq: filter.sellerId } : {}), $nin: suspendedSellerIds }
+    const [suspendedSellerIds, hiddenShops] = await Promise.all([
+      User.find({ $or: [{ blocked: true }, { status: { $in: ['suspended', 'banned'] } }] }).distinct('_id'),
+      Shop.find({ approvalStatus: { $in: ['pending', 'rejected', 'suspended'] } }).select('id productIds').lean()
+    ])
+    const hiddenSellerIds = suspendedSellerIds.map(String)
+    filter.sellerId = { ...(filter.sellerId ? { $eq: filter.sellerId } : {}), $nin: hiddenSellerIds }
+    const hiddenProductIds = hiddenShops.flatMap(shop => shop.productIds || [])
+    if (hiddenShops.length) filter.$nor = [
+      { shopId: { $in: hiddenShops.map(shop => shop.id) } },
+      ...(hiddenProductIds.length ? [{ id: { $in: hiddenProductIds } }] : [])
+    ]
     res.json((await Product.find(filter).lean()).map(publicProduct))
   } catch (error) { next(error) }
 })
@@ -47,6 +78,16 @@ router.get('/:id', async (req, res, next) => {
     let product
     if (!isMongoReady()) return res.status(503).json({ error: 'Listings are unavailable until the marketplace database is connected.' })
     const found = await Product.findOne({ id: req.params.id, status: { $ne: 'Rejected' } }).lean()
+    if (found) {
+      const owningShop = await Shop.findOne({
+        $or: [
+          ...(found.shopId ? [{ id: found.shopId }] : []),
+          { productIds: found.id }
+        ],
+        approvalStatus: { $in: ['pending', 'rejected', 'suspended'] }
+      }).select('id').lean()
+      if (owningShop) return res.status(404).json({ error: 'Product not found' })
+    }
     if (found?.sellerId && mongoose.isValidObjectId(found.sellerId)) {
       const seller = await User.findById(found.sellerId).select('status blocked').lean()
       if (!seller || (!seller.blocked && (!seller.status || seller.status === 'active'))) product = publicProduct(found)
