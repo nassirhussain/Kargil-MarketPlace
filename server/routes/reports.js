@@ -4,8 +4,9 @@ import Report from '../models/Report.js'
 import User from '../models/User.js'
 import Conversation from '../models/Conversation.js'
 import { requireAuth } from '../middleware/auth.js'
-import { isAdmin } from '../lib/admin.js'
 import { rateLimit } from '../middleware/rateLimit.js'
+import { requireAdmin } from '../middleware/admin.js'
+import { escapeRegex, hasInvalidAdminStrings, paginatedResult, parseAdminPage } from '../lib/adminQueries.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -76,19 +77,36 @@ router.post('/', async (req, res, next) => {
   }
 })
 
-router.get('/', async (req, res, next) => {
+router.get('/', requireAdmin, async (req, res, next) => {
   try {
-    if (!isAdmin(req.user)) return res.status(403).json({ error: 'Admin access required' })
-    const status = req.query.status
-    const filter = status && ['Pending', 'Reviewing', 'Resolved', 'Rejected'].includes(status) ? { status } : {}
-    const reports = await Report.find(filter).sort({ createdAt: -1 }).limit(200).lean()
-    res.json(reports.map(({ _id, __v, ...report }) => ({ ...report, id: String(_id) })))
+    const page = parseAdminPage(req.query)
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : ''
+    const status = typeof req.query.status === 'string' ? req.query.status : 'all'
+    const targetType = typeof req.query.targetType === 'string' ? req.query.targetType : 'all'
+    if (!page || hasInvalidAdminStrings(req.query, ['q', 'status', 'targetType']) || q.length > 120 ||
+        !['all', 'Pending', 'Reviewing', 'Resolved', 'Rejected'].includes(status) ||
+        !['all', 'listing', 'seller', 'message'].includes(targetType)) {
+      return res.status(400).json({ error: 'Invalid report filters or pagination.' })
+    }
+    const conditions = []
+    if (status !== 'all') conditions.push({ status })
+    if (targetType !== 'all') conditions.push({ targetType })
+    if (q) {
+      const expression = new RegExp(escapeRegex(q), 'i')
+      conditions.push({ $or: [{ targetName: expression }, { reason: expression }, { details: expression }] })
+    }
+    const filter = conditions.length ? { $and: conditions } : {}
+    const [records, total] = await Promise.all([
+      Report.find(filter).sort({ createdAt: -1, _id: -1 }).skip(page.skip).limit(page.pageSize).lean(),
+      Report.countDocuments(filter)
+    ])
+    res.json(paginatedResult(records.map(({ _id, __v, ...report }) => ({ ...report, id: String(_id) })), total, page))
   } catch (error) { next(error) }
 })
 
-router.patch('/:id', async (req, res, next) => {
+router.patch('/:id', requireAdmin, async (req, res, next) => {
   try {
-    if (!isAdmin(req.user)) return res.status(403).json({ error: 'Admin access required' })
+    if (!/^[a-f\d]{24}$/i.test(req.params.id)) return res.status(404).json({ error: 'Report not found' })
     if (!['Pending', 'Reviewing', 'Resolved', 'Rejected'].includes(req.body.status)) {
       return res.status(400).json({ error: 'Choose Pending, Reviewing, Resolved, or Rejected status' })
     }

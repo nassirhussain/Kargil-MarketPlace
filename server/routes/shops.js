@@ -5,10 +5,19 @@ import Product from '../models/Product.js'
 import User from '../models/User.js'
 import { isMongoReady, stripMongo } from '../lib/mongodb.js'
 import { requireAuth } from '../middleware/auth.js'
+import {
+  businessPublicFilter,
+  canManageBusiness,
+  ownerBusinessFields,
+  ownerUpdateStatus,
+  publicBusinessFields,
+  validateBusinessText
+} from '../lib/businessModeration.js'
 
 const router = Router()
 const cleanText = (value, maxLength) => typeof value === 'string' ? value.trim().slice(0, maxLength) : ''
-const canManage = (shop, user) => shop.ownerId === user.id || user.role === 'admin'
+const canManage = (shop, user) => canManageBusiness(shop, user) || user.role === 'admin'
+const publicShop = shop => ({ ...publicBusinessFields(stripMongo(shop)), products: shop.products || [] })
 const publicProduct = product => {
   const value = stripMongo(product)
   if (value.coordinates && Number.isFinite(Number(value.coordinates.latitude)) && Number.isFinite(Number(value.coordinates.longitude))) {
@@ -28,7 +37,10 @@ router.get('/', async (req, res, next) => {
     const suspendedSellerIds = (await User.find({
       $or: [{ blocked: true }, { status: { $in: ['suspended', 'banned'] } }]
     }).distinct('_id')).map(String)
-    const shops = await Shop.find({ ownerId: { $nin: suspendedSellerIds } }).sort({ name: 1 }).lean()
+    const shops = await Shop.find({
+      ownerId: { $nin: suspendedSellerIds },
+      ...businessPublicFilter()
+    }).sort({ name: 1 }).lean()
     const products = await Product.find({
       $or: [
         { shopId: { $in: shops.map(shop => shop.id) } },
@@ -43,14 +55,22 @@ router.get('/', async (req, res, next) => {
         product.shopId === shop.id || (shop.productIds || []).includes(product.id)
       ).map(publicProduct))
     }
-    res.json(shops.map(shop => ({ ...stripMongo(shop), products: productsByShop.get(shop.id) || [] })))
+    res.json(shops.map(shop => publicShop({ ...shop, products: productsByShop.get(shop.id) || [] })))
+  } catch (error) { next(error) }
+})
+
+router.get('/mine', requireAuth, async (req, res, next) => {
+  try {
+    if (!isMongoReady()) return res.status(503).json({ error: 'Shop management requires the marketplace database.' })
+    const shops = await Shop.find({ ownerId: req.user.id }).sort({ createdAt: -1, _id: -1 }).lean()
+    res.json(shops.map(ownerBusinessFields))
   } catch (error) { next(error) }
 })
 
 router.get('/:id', async (req, res, next) => {
   try {
     if (!isMongoReady()) return res.status(503).json({ error: 'Local shops are unavailable until the database is connected.' })
-    const shop = await Shop.findOne({ id: req.params.id }).lean()
+    const shop = await Shop.findOne({ id: req.params.id, ...businessPublicFilter() }).lean()
     if (!shop) return res.status(404).json({ error: 'Shop not found' })
     const suspendedSellerIds = (await User.find({
       $or: [{ blocked: true }, { status: { $in: ['suspended', 'banned'] } }]
@@ -61,18 +81,19 @@ router.get('/:id', async (req, res, next) => {
       status: { $nin: ['Sold', 'Rejected'] },
       sellerId: { $nin: suspendedSellerIds }
     }).sort({ createdAt: -1 }).lean()
-    res.json({ ...stripMongo(shop), products: products.map(publicProduct) })
+    res.json(publicShop({ ...shop, products: products.map(publicProduct) }))
   } catch (error) { next(error) }
 })
 
 router.post('/', requireAuth, async (req, res, next) => {
   try {
     if (!isMongoReady()) return res.status(503).json({ error: 'Shop registration requires the marketplace database. Please try again later.' })
-    const name = cleanText(req.body.name, 120)
-    const category = cleanText(req.body.category, 80)
-    const location = cleanText(req.body.location, 120)
-    const description = cleanText(req.body.description, 1000)
-    const contactNumber = cleanText(req.body.contactNumber, 30)
+    const body = req.body || {}
+    const name = cleanText(body.name, 120)
+    const category = cleanText(body.category, 80)
+    const location = cleanText(body.location, 120)
+    const description = cleanText(body.description, 1000)
+    const contactNumber = cleanText(body.contactNumber, 30)
     if (!name || !category || !location || !description) return res.status(400).json({ error: 'Shop name, category, location, and description are required.' })
     if (contactNumber && !/^[+0-9 ()-]{7,30}$/.test(contactNumber)) return res.status(400).json({ error: 'Enter a valid shop contact number.' })
     const shop = await Shop.create({
@@ -83,9 +104,11 @@ router.post('/', requireAuth, async (req, res, next) => {
       description,
       contactNumber,
       ownerId: req.user.id,
-      productIds: []
+      productIds: [],
+      approvalStatus: 'pending',
+      moderationReason: ''
     })
-    res.status(201).json({ ...stripMongo(shop), products: [] })
+    res.status(201).json(ownerBusinessFields(shop))
   } catch (error) { next(error) }
 })
 
@@ -95,17 +118,19 @@ router.put('/:id', requireAuth, async (req, res, next) => {
     const shop = await Shop.findOne({ id: req.params.id })
     if (!shop) return res.status(404).json({ error: 'Shop not found' })
     if (!canManage(shop, req.user)) return res.status(403).json({ error: 'You can only update a shop you manage.' })
-    const updates = {}
-    for (const field of ['name', 'category', 'location', 'description', 'contactNumber']) {
-      if (req.body[field] !== undefined) updates[field] = cleanText(req.body[field], field === 'description' ? 1000 : 120)
-    }
-    if (['name', 'category', 'location', 'description'].some(field => req.body[field] !== undefined && !updates[field])) {
-      return res.status(400).json({ error: 'Shop name, category, location, and description cannot be empty.' })
-    }
+    const { updates, error } = validateBusinessText(
+      ['name', 'category', 'location', 'description', 'contactNumber'],
+      req.body || {},
+      { name: 120, category: 80, location: 120, description: 1000, contactNumber: 30 },
+      ['contactNumber']
+    )
+    if (error) return res.status(400).json({ error })
     if (updates.contactNumber && !/^[+0-9 ()-]{7,30}$/.test(updates.contactNumber)) return res.status(400).json({ error: 'Enter a valid shop contact number.' })
+    if (!Object.keys(updates).length) return res.status(400).json({ error: 'Provide at least one shop detail to update.' })
     Object.assign(shop, updates)
+    if (canManageBusiness(shop, req.user)) Object.assign(shop, ownerUpdateStatus(shop))
     await shop.save()
-    res.json(stripMongo(shop))
+    res.json(ownerBusinessFields(shop))
   } catch (error) { next(error) }
 })
 

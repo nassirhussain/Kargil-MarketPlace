@@ -46,9 +46,11 @@ For local development, leave `VITE_API_BASE` unset to use the Vite `/api` proxy,
 | `JWT_SECRET` | Required in production | Long, private signing key; never expose to Vite |
 | `OTP_HASH_SECRET` | Required in production | Separate HMAC key for hashed email OTPs |
 | `ADMIN_EMAILS` | Required in production | Comma-separated admin email allowlist |
-| `FRONTEND_URL` | Required in production | Allowed frontend origin(s), comma-separated |
-| `API_URL` | Required if Google OAuth is configured | Public API base URL used for the OAuth callback |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional | Google sign-in; credentials remain server-side |
+| `FRONTEND_URL` | Required in production | Allowed frontend origin(s) for CORS, comma-separated; each must be an origin |
+| `OAUTH_FRONTEND_URL` | Required when Google sign-in is enabled | One primary frontend origin selected from `FRONTEND_URL`; never a comma-separated list |
+| `API_URL` | Required when Google sign-in is enabled unless the host provides `RENDER_EXTERNAL_URL` | Public backend origin, optionally ending in `/api`; the callback path is appended exactly once |
+| `RENDER_EXTERNAL_URL` | Provided by Render | Used only as the backend public-origin fallback when `API_URL` is unset |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional as a pair | Google sign-in; credentials remain server-side |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Optional, required for email OTP | Resend API key and verified sender address |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` | Optional, required for SMS OTP | Twilio Verify SMS delivery and code checks |
 | `VITE_API_BASE` | Frontend deployment setting | Public API URL ending in `/api`; it is not secret |
@@ -84,8 +86,8 @@ npm test          # Offline Node.js unit tests
 - `src/main.jsx`, `src/styles.css` — React routes, marketplace screens, and styling
 - `server/server.js` — Express app, CORS, OAuth initialization, and API mounting
 - `server/routes/` — Authentication, products, messaging, moderation, and category APIs
-- `server/models/` — Mongoose user, product, shop, hotel, wishlist, report, follow, block, category, verification, and conversation schemas
-- `server/lib/` — MongoDB setup/seeding, admin policy, default categories, and OTP provider adapters
+- `server/models/` — Mongoose user, product, shop, hotel, wishlist, report, follow, block, category, verification, conversation, and short-lived OAuth exchange schemas
+- `server/lib/` — MongoDB setup/seeding, admin policy, OAuth URL/state helpers, default categories, and OTP provider adapters
 - `server/middleware/` — Authentication and request rate limiting
 - `render.yaml` — Render API/static frontend services and SPA fallback rewrite
 
@@ -105,12 +107,16 @@ npm test          # Offline Node.js unit tests
 
 1. Set backend secrets in the API host environment. Do not commit `.env`.
 2. Configure `MONGODB_URI`, `JWT_SECRET`, `OTP_HASH_SECRET`, `ADMIN_EMAILS`, `NODE_ENV=production`, and `SEED_MONGO=false`; configure OTP provider variables for every verification channel you offer.
-3. Set `FRONTEND_URL` to exact deployed origin(s), and set `API_URL` for OAuth callbacks.
-4. Set frontend build variable `VITE_API_BASE` to the deployed API URL ending in `/api`. Vite variables are public and must never contain credentials. `render.yaml` sets the currently verified API origin; verify the Render service URL before deploying.
-5. Add `${API_URL}/api/auth/google/callback` as an authorized Google OAuth redirect URI.
-6. Configure a verified Resend sender/domain and a Twilio Verify service before advertising email/SMS verification.
-7. Review MongoDB backups, access controls, and network allowlists.
-8. Deploy API and frontend, then verify `/api/health`, login, listings, and provider delivery against the deployed environment.
+3. For this deployment, verify the API responds at `https://kargil-marketplace1.onrender.com/api/health`. Set `API_URL=https://kargil-marketplace1.onrender.com` (or rely on Render's `RENDER_EXTERNAL_URL`) and confirm MongoDB reports connected.
+4. Set `FRONTEND_URL` to a comma-separated allowlist of exact frontend origins, including `https://kargil-market-place.vercel.app`. Set `OAUTH_FRONTEND_URL=https://kargil-market-place.vercel.app` as the single primary sign-in destination; it must exactly match an entry in `FRONTEND_URL`.
+5. Set the Vercel production and preview environment value `VITE_API_BASE=https://kargil-marketplace1.onrender.com/api`. This is public configuration, not a secret. It must be HTTPS and end in exactly one `/api`.
+6. In Google Cloud Console, add exactly `https://kargil-marketplace1.onrender.com/api/auth/google/callback` to the OAuth client’s authorized redirect URIs. Ensure the OAuth consent screen/client is enabled for the intended users and origins.
+7. In Render, verify the backend `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are a matching pair for that Google OAuth client, alongside `MONGODB_URI`, `JWT_SECRET`, `API_URL`, `OAUTH_FRONTEND_URL`, and `FRONTEND_URL`. Never put these secrets in Vercel or `VITE_*` variables.
+8. Configure a verified Resend sender/domain and a Twilio Verify service before advertising email/SMS verification.
+9. Review MongoDB backups, access controls, and network allowlists.
+10. Deploy API and frontend, then verify `/api/health`, email/password login, Google sign-in, listings, and provider delivery against the deployed environment.
+
+Google sign-in uses a short-lived HTTP-only SameSite=Lax OAuth state cookie. After the Google callback, the API stores a two-minute, single-use exchange code in MongoDB and returns it in the URL fragment, not a seven-day JWT in the query string. The frontend exchanges the code by POST, validates the returned active public user, and only then stores the application token. Exchange records expire automatically and are also checked for expiry when consumed. This reduces URL/referrer exposure but does not replace the existing browser local-storage token design for authenticated sessions.
 
 Render Blueprint services have auto-deploy enabled. A local build does not itself deploy changes; verify the Render deployment and public site after a Git push.
 

@@ -1,13 +1,13 @@
 import mongoose from 'mongoose'
+import { createRequestId, logDiagnostic } from './diagnostics.js'
 
 export const mongoState = {
-  status: 'disabled',
-  error: null
+  status: 'disabled'
 }
 
 export const isMongoReady = () => mongoState.status === 'connected' && mongoose.connection.readyState === 1
 
-export async function connectMongo() {
+export async function connectMongo(requestId = createRequestId()) {
   if (!process.env.MONGODB_URI) {
     mongoState.status = 'disabled'
     return false
@@ -18,11 +18,15 @@ export async function connectMongo() {
       serverSelectionTimeoutMS: Number(process.env.MONGODB_SERVER_SELECTION_TIMEOUT_MS || 5000)
     })
     mongoState.status = 'connected'
-    mongoState.error = null
     return true
   } catch (error) {
     mongoState.status = 'error'
-    mongoState.error = error.message
+    logDiagnostic({
+      event: 'mongo.connection',
+      code: 'MONGO_CONNECTION_FAILED',
+      requestId,
+      error
+    })
     return false
   }
 }
@@ -32,7 +36,12 @@ mongoose.connection.on('disconnected', () => {
 })
 mongoose.connection.on('error', error => {
   mongoState.status = 'error'
-  mongoState.error = error.message
+  logDiagnostic({
+    event: 'mongo.connection',
+    code: 'MONGO_RUNTIME_ERROR',
+    requestId: createRequestId(),
+    error
+  })
 })
 
 export function stripMongo(document) {

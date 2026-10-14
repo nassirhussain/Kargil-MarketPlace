@@ -9,7 +9,10 @@ const hotelSchema = new mongoose.Schema({
   contactNumber: String,
   description: String,
   rooms: { type: [mongoose.Schema.Types.Mixed], default: [] },
-  foods: { type: [String], default: [] }
+  foods: { type: [String], default: [] },
+  approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected', 'suspended'] },
+  moderationReason: { type: String, maxlength: 500 },
+  createdAt: { type: Date, immutable: true }
 }, { strict: false, timestamps: false })
 
 export default mongoose.models.Hotel || mongoose.model('Hotel', hotelSchema)

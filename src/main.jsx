@@ -3,9 +3,11 @@ import { createPortal } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Link, NavLink, useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
 import { Search, Heart, MessageCircle, ShoppingBag, Plus, Menu, X, ChevronRight, MapPin, Star, ArrowRight, BookOpen, Armchair, Shirt, SlidersHorizontal, Package, TrendingUp, CheckCircle2, Send, Smartphone, CarFront, Dumbbell, CookingPot, BriefcaseBusiness, House, Wrench, Repeat2, Share2, Flag, LocateFixed, BadgeCheck, ShieldAlert, Phone, Navigation, Store, AlertCircle, CircleCheck, Info, LogOut, UserRound, LayoutList, ChevronDown, LoaderCircle } from 'lucide-react'
+import GoogleAuthCallback from './AuthCallback.jsx'
+import AdminModerationDashboard from './AdminDashboard.jsx'
 import './styles.css'
 
-const API_BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? '/api' : '')
+const API_BASE = (import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? '/api' : '')).replace(/\/+$/, '')
 const authHeaders = (json = false) => {
   const headers = {}
   if (json) headers['Content-Type'] = 'application/json'
@@ -13,6 +15,20 @@ const authHeaders = (json = false) => {
   if (token) headers.Authorization = `Bearer ${token}`
   return headers
 }
+const safePostAuthPath = path => {
+  if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//') || path.includes('\\')) return '/profile'
+  try {
+    const url = new URL(path, window.location.origin)
+    return url.origin === window.location.origin ? `${url.pathname}${url.search}${url.hash}` : '/profile'
+  } catch { return '/profile' }
+}
+const oauthErrorMessage = code => ({
+  google_cancelled: 'Google sign-in was cancelled. You can try again or use email or phone instead.',
+  invalid_state: 'This sign-in attempt expired or could not be verified. Please start again.',
+  oauth_unavailable: 'Google sign-in is temporarily unavailable. Please try another sign-in method or try again later.',
+  google_failed: 'Google could not complete sign-in. Please try again.',
+  account_unavailable: 'This account is not active. Contact support if you believe this is a mistake.'
+}[code] || '')
 const formatINR = value => `₹${Number(value || 0).toLocaleString('en-IN')}`
 const locations = ['Kargil', 'Drass', 'Sankoo', 'Zanskar', 'Shargole', 'Taisuru', 'Barsoo', 'Other Ladakh locations']
 const canonicalCategory = value => ({
@@ -212,7 +228,7 @@ function ProfilePage({user,setUser,products,favorites,blockedSellers,setBlockedS
     <section className="profile-section mt-5"><div className="profile-section-heading"><span className="profile-section-icon"><BadgeCheck size={18}/></span><div><h2>Account verification</h2><p>Verification codes expire after 10 minutes. Never share your code with anyone.</p></div></div><div className="mt-4 flex flex-wrap gap-3">{user.email&&<button onClick={()=>setVerificationChannel('email')} className={`rounded-xl px-4 py-2 text-sm font-bold ${verificationChannel==='email'?'bg-teal text-white':'bg-cream text-ink'}`}>Email {user.emailVerified?'verified':'not verified'}</button>}{user.phone&&<button onClick={()=>setVerificationChannel('phone')} className={`rounded-xl px-4 py-2 text-sm font-bold ${verificationChannel==='phone'?'bg-teal text-white':'bg-cream text-ink'}`}>Phone {user.phoneVerified?'verified':'not verified'}</button>}</div>{((verificationChannel==='email'&&user.email&&!user.emailVerified)||(verificationChannel==='phone'&&user.phone&&!user.phoneVerified))&&<form onSubmit={confirmVerification} className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_auto]"><input inputMode="numeric" autoComplete="one-time-code" maxLength="6" pattern="[0-9]{6}" value={verificationCode} onChange={event=>setVerificationCode(event.target.value.replace(/\D/g,'').slice(0,6))} placeholder="6-digit code" aria-label="Verification code" className="rounded-xl border border-ink/10 px-4 py-3"/><button type="button" disabled={verificationBusy||resendSeconds>0} onClick={requestVerification} className="rounded-xl border px-4 py-3 text-sm font-bold disabled:opacity-50">{verificationBusy?'Please wait…':resendSeconds?`Resend in ${resendSeconds}s`:'Send / resend code'}</button><button disabled={verificationBusy||verificationCode.length!==6} className="rounded-xl bg-teal px-4 py-3 text-sm font-bold text-white disabled:opacity-50">Verify code</button></form>}{verificationError&&<Notice kind="error" className="mt-3">{verificationError}</Notice>}{verificationMessage&&<Notice kind="success" className="mt-3">{verificationMessage}</Notice>}</section>
     <section className="mt-5 rounded-2xl bg-white p-5 shadow-sm"><h2 className="text-lg font-black">Following and blocked accounts</h2><p className="mt-1 text-sm text-ink/55">These preferences sync with your account across devices.</p>{relationshipError&&<p role="alert" className="mt-3 text-sm font-semibold text-red-700">{relationshipError}</p>}{relationshipIds.length?relationshipProfiles.map(profile=><div key={profile.id} className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3"><Link to={`/seller/${profile.id}`} className="font-bold text-teal">{profile.name||'Marketplace seller'}<span className="ml-2 text-xs font-normal text-ink/45">{blockedSellers.includes(profile.id)?'Blocked':'Following'}</span></Link><div className="flex gap-2">{followedSellers.includes(profile.id)&&<button disabled={relationshipBusy===profile.id} onClick={()=>removeRelationship(profile.id,'follow')} className="rounded-lg border px-3 py-2 text-xs font-bold">Unfollow</button>}{blockedSellers.includes(profile.id)&&<button disabled={relationshipBusy===profile.id} onClick={()=>removeRelationship(profile.id,'block')} className="rounded-lg border border-teal/20 px-3 py-2 text-xs font-bold text-teal">Unblock</button>}</div></div>):<p className="mt-4 text-sm text-ink/50">You are not following or blocking anyone.</p>}</section>
     <div className="mt-5 flex flex-wrap gap-3"><Link to="/my-listings" className="rounded-xl bg-teal px-4 py-3 text-sm font-bold text-white">My listings ({mine.length})</Link><Link to="/wishlist" className="rounded-xl bg-white px-4 py-3 text-sm font-bold shadow-sm">Wishlist ({favorites.length})</Link><Link to="/dashboard" className="rounded-xl bg-white px-4 py-3 text-sm font-bold shadow-sm">Seller dashboard</Link></div>
-    {ratingError&&<p role="alert" className="mt-5 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-900">Unable to load seller ratings: {ratingError}</p>}<div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Stat icon={ShoppingBag} label="Active listings" value={active} trend="Available"/><Stat icon={CheckCircle2} label="Sold items" value={sold} trend="Completed"/><Stat icon={Heart} label="Saved items" value={favorites.length} trend="Synced to account"/><Stat icon={Star} label="Seller rating" value={rating.count?rating.average.toFixed(1):'—'} trend={`${rating.count} ratings`}/></div>
+    {ratingError&&<Notice kind="warning" className="mt-5">Unable to load seller ratings: {ratingError}</Notice>}<div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Stat icon={ShoppingBag} label="Active listings" value={active} trend="Available"/><Stat icon={CheckCircle2} label="Sold items" value={sold} trend="Completed"/><Stat icon={Heart} label="Saved items" value={favorites.length} trend="Synced to account"/><Stat icon={Star} label="Seller rating" value={rating.count?rating.average.toFixed(1):'—'} trend={`${rating.count} ratings`}/></div>
   </div>
 }
 function App() {
@@ -302,7 +318,7 @@ function App() {
     const redirect = sessionStorage.getItem('campuskart-after-auth')
     if (user && redirect) {
       sessionStorage.removeItem('campuskart-after-auth')
-      appNavigate(redirect)
+      appNavigate(safePostAuthPath(redirect))
     }
   }, [user, appNavigate])
   useEffect(() => {
@@ -409,19 +425,21 @@ function App() {
   const visibleProducts=products.filter(product=>product.status!=='Rejected'&&!blockedSellers.includes(product.sellerId))
   const activeCategories=marketCategories.filter(category=>category.active!==false)
   return <div className="min-h-screen bg-cream text-ink"><PageMeta /><Header menu={menu} setMenu={setMenu} user={user} setUser={setUser} favoritesCount={favorites.length} unreadTotal={unreadTotal} /><div className="toast-stack" aria-live="polite">{toast&&<Notice kind={toast.kind} message={toast.message} onDismiss={()=>setToast(null)}/>}</div><main>
-    {preferencesError&&<p role="alert" className="mx-auto mt-3 max-w-7xl rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">{preferencesError} Follow and block controls need a signed-in connection.</p>}
-    {sessionError&&<div role="alert" className="mx-auto mt-3 flex max-w-7xl flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900"><span>Unable to validate your session: {sessionError}</span><button onClick={()=>setSessionRetry(value=>value+1)} className="rounded-lg bg-amber-800 px-3 py-2 text-white">Try again</button></div>}
-    {categoriesError&&<div role="alert" className="mx-auto mt-3 flex max-w-7xl flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900"><span>Unable to load marketplace categories: {categoriesError}</span><button onClick={()=>setCategoriesRetry(value=>value+1)} className="rounded-lg bg-amber-800 px-3 py-2 text-white">Try again</button></div>}
-    {wishlistError&&<p role="alert" className="mx-auto mt-3 max-w-7xl rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{wishlistError}</p>}
-    {unreadError&&<p role="alert" className="mx-auto mt-3 max-w-7xl rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">Unable to refresh unread messages: {unreadError}</p>}
-    {productsError&&<div role="alert" className="mx-auto mt-3 flex max-w-7xl flex-wrap items-center justify-between gap-3 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700"><span>Unable to load listings: {productsError}</span><button onClick={()=>setProductsRetry(value=>value+1)} className="rounded-lg bg-red-700 px-3 py-2 text-white">Try again</button></div>}
+    {preferencesError&&<Notice kind="warning" className="mx-auto mt-3 max-w-7xl">{preferencesError} Follow and block controls need a signed-in connection.</Notice>}
+    {sessionError&&<Notice kind="warning" className="mx-auto mt-3 max-w-7xl">Unable to validate your session: {sessionError}<button onClick={()=>setSessionRetry(value=>value+1)} className="ml-3 underline">Try again</button></Notice>}
+    {categoriesError&&<Notice kind="warning" className="mx-auto mt-3 max-w-7xl">Unable to load marketplace categories: {categoriesError}<button onClick={()=>setCategoriesRetry(value=>value+1)} className="ml-3 underline">Try again</button></Notice>}
+    {wishlistError&&<Notice kind="error" className="mx-auto mt-3 max-w-7xl">{wishlistError}</Notice>}
+    {unreadError&&<Notice kind="warning" className="mx-auto mt-3 max-w-7xl">Unable to refresh unread messages: {unreadError}</Notice>}
+    {productsError&&<Notice kind="error" className="mx-auto mt-3 max-w-7xl">Unable to load listings: {productsError}<button onClick={()=>setProductsRetry(value=>value+1)} className="ml-3 underline">Try again</button></Notice>}
     <Routes>
     <Route path="/" element={<Home products={visibleProducts} productsLoading={productsLoading} favorites={favorites} toggleFavorite={toggleFavorite} selectedLocation={selectedLocation} setSelectedLocation={setSelectedLocation} coordinates={coordinates} setNearby={setNearby} categoryData={activeCategories} />} />
     <Route path="/browse" element={<Browse products={visibleProducts} productsLoading={productsLoading} favorites={favorites} toggleFavorite={toggleFavorite} selectedLocation={selectedLocation} setSelectedLocation={setSelectedLocation} coordinates={coordinates} setNearby={setNearby} categoryData={activeCategories} />} />
     <Route path="/marketplace" element={<Browse products={visibleProducts} productsLoading={productsLoading} favorites={favorites} toggleFavorite={toggleFavorite} selectedLocation={selectedLocation} setSelectedLocation={setSelectedLocation} coordinates={coordinates} setNearby={setNearby} categoryData={activeCategories} />} />
     <Route path="/shops" element={<Shops user={user} categoryData={activeCategories} />} />
     <Route path="/hotels" element={<Hotels user={user} />} />
-    <Route path="/about" element={<About />} />
+    <Route path="/about" element={<EditorialAbout />} />
+    <Route path="/privacy" element={<TrustDocument kind="privacy" />} />
+    <Route path="/terms" element={<TrustDocument kind="terms" />} />
     <Route path="/product/:id" element={<Product products={visibleProducts} favorites={favorites} toggleFavorite={toggleFavorite} user={user} />} />
     <Route path="/seller/:sellerId" element={<SellerProfile followedSellers={followedSellers} setFollowedSellers={setFollowedSellers} blockedSellers={blockedSellers} setBlockedSellers={setBlockedSellers} user={user} />} />
     <Route path="/sell" element={<Sell setProducts={setProducts} user={user} selectedLocation={selectedLocation} categoryData={activeCategories} />} />
@@ -430,16 +448,16 @@ function App() {
     <Route path="/dashboard" element={<Dashboard products={products} user={user} />} />
     <Route path="/messages" element={<Messages user={user} />} />
     <Route path="/chat" element={<Messages user={user} />} />
-    <Route path="/auth/callback" element={<AuthCallback setUser={setUser} />} />
+    <Route path="/auth/callback" element={<GoogleAuthCallback setUser={setUser} />} />
     <Route path="/login" element={<Auth mode="login" setUser={setUser} />} />
     <Route path="/signup" element={<Auth mode="signup" setUser={setUser} />} />
-    <Route path="/admin" element={<AdminDashboard products={products} setProducts={setProducts} user={user} categoryData={marketCategories} setCategoryData={setMarketCategories} />} />
+    <Route path="/admin" element={<AdminModerationDashboard user={user} categoryData={marketCategories} setCategoryData={setMarketCategories} />} />
     <Route path="/profile" element={<ProfilePage user={user} setUser={setUser} products={products} favorites={favorites} blockedSellers={blockedSellers} setBlockedSellers={setBlockedSellers} followedSellers={followedSellers} setFollowedSellers={setFollowedSellers} />} />
     <Route path="*" element={<NotFound />} />
-  </Routes></main><Footer /></div>
+  </Routes></main><Footer /><LegalFooterLinks /></div>
 }
 function NotFound() {
-  return <div className="mx-auto max-w-xl px-5 py-20 text-center"><p className="text-sm font-bold uppercase tracking-widest text-teal">404</p><h1 className="mt-2 text-3xl font-black">This page could not be found</h1><p className="mt-2 text-sm text-ink/55">The link may be outdated, or the address may be mistyped.</p><Link to="/" className="mt-6 inline-flex rounded-xl bg-teal px-5 py-3 font-bold text-white">Go to homepage</Link></div>
+  return <div className="not-found-page"><p className="eyebrow">404 <span>·</span> KARGIL MARKETPLACE</p><h1>The trail<br/><em>ends here.</em></h1><p>The page you’re looking for could not be found. It may have moved, or the address may be mistyped.</p><div><Link to="/" className="button-dark px-5 py-3 text-sm font-semibold">Return home <ArrowRight size={16}/></Link><Link to="/marketplace" className="button-outline px-5 py-3 text-sm font-semibold">Browse marketplace</Link></div></div>
 }
 function Header({ menu, setMenu, user, setUser, favoritesCount, unreadTotal=0 }) {
   const location = useLocation()
@@ -576,9 +594,9 @@ function ListingSection({title,eyebrow,products,favorites,toggleFavorite,empty,l
   return <section className="listing-section mx-auto max-w-7xl px-4 py-12 sm:px-5 lg:px-8" data-reveal><div className="mb-7 flex items-end justify-between"><div><p className="eyebrow">{eyebrow}</p><h2 className="editorial-heading text-3xl sm:text-4xl">{title}</h2></div><Link to="/marketplace" className="text-link">See all <ArrowRight size={16}/></Link></div>{products.length?<div className="result-grid grid gap-x-5 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">{products.map(product=><ProductCard key={product.id} product={product} favorite={favorites.includes(product.id)} toggleFavorite={toggleFavorite}/>)}</div>:<div className="listing-empty text-sm text-ink/55">{loading?<LoadingState message="Finding local listings"/>:empty}</div>}</section>
 }
 function ProductCard({product, favorite, toggleFavorite}) {
-  return <article className="product-card group overflow-hidden border border-ink/5 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl">
-    <div className="relative"><Link to={`/product/${product.id}`} aria-label={`View ${product.title}`}><img loading="lazy" className="aspect-[4/3] w-full object-cover transition duration-300 group-hover:scale-[1.02]" src={product.images?.[0]||product.image} alt={product.title}/></Link>{(product.featured||product.tag)&&<span className="absolute left-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-bold text-teal">{product.featured?'Featured':product.tag}</span>}{toggleFavorite&&<button type="button" onClick={() => toggleFavorite(product.id)} aria-label={favorite?'Remove from wishlist':'Save to wishlist'} aria-pressed={favorite} className="absolute right-3 top-3 grid h-10 w-10 place-items-center rounded-full bg-white/95 text-ink shadow-sm transition hover:scale-105">{favorite ? <Heart size={18} fill="#f9735b" className="text-coral"/> : <Heart size={18}/>}</button>}</div>
-    <div className="p-4"><div className="flex items-start justify-between gap-2"><Link to={`/product/${product.id}`}><h3 className="line-clamp-2 min-h-10 font-bold">{product.title}</h3></Link><span className="shrink-0 text-lg font-black">{formatINR(product.price)}</span></div><p className="mt-1 text-xs font-semibold text-teal">{canonicalCategory(product.category)}</p><div className="mt-3 flex items-center justify-between gap-2 text-xs text-ink/55"><span className="flex min-w-0 items-center gap-1 truncate"><MapPin size={13} className="shrink-0"/>{product.location||'Ladakh'}</span><span className="shrink-0 rounded-full bg-cream px-2 py-1">{product.condition||'Condition not specified'}</span></div></div>
+  return <article className="product-card group">
+    <div className="product-card-image"><Link to={`/product/${product.id}`} aria-label={`View ${product.title}`}><img loading="lazy" src={product.images?.[0]||product.image} alt={product.title}/></Link>{(product.featured||product.tag)&&<span className="product-card-featured">{product.featured?'Featured':product.tag}</span>}{product.status==='Sold'&&<span className="product-card-status">Sold</span>}{toggleFavorite&&<button type="button" onClick={() => toggleFavorite(product.id)} aria-label={favorite?'Remove from wishlist':'Save to wishlist'} aria-pressed={favorite} className={`product-card-save ${favorite?'is-saved':''}`}>{favorite?<Heart size={18} fill="currentColor"/>:<Heart size={18}/>}</button>}</div>
+    <div className="product-card-copy"><p className="product-card-category">{canonicalCategory(product.category)}</p><div className="product-card-title-row"><Link to={`/product/${product.id}`}><h3>{product.title}</h3></Link><strong>{formatINR(product.price)}</strong></div><div className="product-card-meta"><span><MapPin size={13}/>{product.location||'Ladakh'}</span><i/>{product.condition||'Condition not specified'}</div></div>
   </article>
 }
 function SellerProfile({followedSellers,setFollowedSellers,blockedSellers,setBlockedSellers,user}) {
@@ -634,13 +652,13 @@ function SellerProfile({followedSellers,setFollowedSellers,blockedSellers,setBlo
   if(blockedSellers.includes(sellerId))return <div className="mx-auto max-w-2xl px-5 py-20 text-center"><h1 className="text-2xl font-black">Seller blocked</h1><p className="mt-2 text-sm text-ink/55">Listings from this seller are hidden on this device.</p><Link to="/marketplace" className="mt-5 inline-block rounded-xl bg-teal px-5 py-3 font-bold text-white">Browse marketplace</Link></div>
   return <div className="mx-auto max-w-7xl px-5 py-10 lg:px-8">
     <Link to="/marketplace" className="text-sm font-bold text-teal">← Back to marketplace</Link>
-    <section className="mt-7 flex flex-col gap-5 rounded-3xl bg-ink p-6 text-white sm:flex-row sm:items-center sm:p-8">
+    <section className="seller-profile-cover mt-7 flex flex-col gap-5 sm:flex-row sm:items-center">
       <div className="grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-full bg-coral text-2xl font-black">{profile?.avatar?<img src={profile.avatar} alt={`${sellerName} profile`} className="h-full w-full object-cover"/>:sellerName.slice(0,2).toUpperCase()}</div>
-      <div className="min-w-0 flex-1"><p className="text-sm text-white/60">Seller profile</p><div className="mt-1 flex flex-wrap items-center gap-2"><h1 className="text-3xl font-black">{sellerName}</h1>{profile?.verified&&<span className="flex items-center gap-1 rounded-full bg-blue-100 px-2 py-1 text-xs font-bold text-blue-800"><BadgeCheck size={14}/>Verified</span>}</div><p className="mt-1 text-sm text-white/65">{[profile?.area,profile?.location].filter(Boolean).join(' · ')||'Location not provided'}{profile?.joinedAt&&` · Joined ${new Date(profile.joinedAt).toLocaleDateString(undefined,{month:'short',year:'numeric'})}`}</p><p className="mt-2 flex items-center gap-2 text-sm text-white/75"><Star size={16} fill="#fbbf24" className="text-yellow-400"/>{rating.count?`${rating.average.toFixed(1)} out of 5 · ${rating.count} ${rating.count===1?'rating':'ratings'}`:'No ratings yet'}</p></div>
+      <div className="min-w-0 flex-1"><p className="text-sm text-white/60">Seller profile</p><div className="mt-1 flex flex-wrap items-center gap-2"><h1 className="text-3xl font-black">{sellerName}</h1>{(profile?.emailVerified||profile?.phoneVerified)&&<span className="seller-verified"><BadgeCheck size={14}/>Verified contact</span>}</div><p className="mt-1 text-sm text-white/65">{[profile?.area,profile?.location].filter(Boolean).join(' · ')||'Location not provided'}{profile?.joinedAt&&` · Joined ${new Date(profile.joinedAt).toLocaleDateString(undefined,{month:'short',year:'numeric'})}`}</p><p className="mt-2 flex items-center gap-2 text-sm text-white/75"><Star size={16} fill="#fbbf24" className="text-yellow-400"/>{rating.count?`${rating.average.toFixed(1)} out of 5 · ${rating.count} ${rating.count===1?'rating':'ratings'}`:'No ratings yet'}</p></div>
       <div className="flex gap-3 text-center"><div className="rounded-2xl bg-white/10 px-5 py-3"><p className="text-xl font-black">{activeListings.length}</p><p className="text-xs text-white/60">Active</p></div><div className="rounded-2xl bg-white/10 px-5 py-3"><p className="text-xl font-black">{soldListings.length}</p><p className="text-xs text-white/60">Sold</p></div></div>
     </section>
     <div className="mt-4 flex flex-wrap gap-2"><button disabled={relationshipBusy} onClick={toggleFollow} className="rounded-xl bg-teal px-4 py-2 text-sm font-bold text-white disabled:opacity-60">{relationshipBusy?'Saving…':following?'Following':'Follow seller'}</button><button onClick={()=>setShowReport(true)} className="rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-bold text-red-700">Report seller</button><button disabled={relationshipBusy} onClick={()=>setConfirmBlock(true)} className="rounded-xl border border-ink/10 bg-white px-4 py-2 text-sm font-bold text-ink/70 disabled:opacity-60">Block seller</button></div>
-    {error&&<p className="mt-6 rounded-xl bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</p>}
+    {error&&<Notice kind="error" className="mt-6">{error}</Notice>}
     <section className="mt-10"><div className="mb-5"><h2 className="text-2xl font-black">Listings from {sellerName}</h2><p className="mt-1 text-sm text-ink/55">Browse items this seller has posted.</p></div>
       {loading?<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{[1,2,3].map(key=><div key={key} className="overflow-hidden rounded-2xl bg-white"><div className="skeleton aspect-[4/3]"/><div className="space-y-3 p-4"><div className="skeleton h-4 w-2/3"/><div className="skeleton h-4 w-1/2"/></div></div>)}</div>:activeListings.length?<div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{activeListings.map(product=><ProductCard key={product.id} product={product} favorite={false}/>)}</div>:<div className="rounded-2xl bg-white p-10 text-center"><Package className="mx-auto text-ink/30" size={30}/><p className="mt-3 font-bold">No active listings</p><p className="mt-1 text-sm text-ink/55">This seller has no items available right now.</p></div>}
     </section>
@@ -702,18 +720,17 @@ function Browse({products,favorites,toggleFavorite,selectedLocation,setSelectedL
       if(sort==='price-asc')return Number(first.price)-Number(second.price)
       if(sort==='price-desc')return Number(second.price)-Number(first.price)
       if(sort==='nearby'){
+        if(!coordinates)return dateValue(second)-dateValue(first)
         const firstDistance=distanceKm(coordinates,first)
         const secondDistance=distanceKm(coordinates,second)
-        if(firstDistance!==null&&secondDistance!==null)return firstDistance-secondDistance
-        const firstMatch=locationFilter!=='All locations'&&(first.location||'').toLowerCase().includes(locationFilter.toLowerCase())
-        const secondMatch=locationFilter!=='All locations'&&(second.location||'').toLowerCase().includes(locationFilter.toLowerCase())
-        return Number(secondMatch)-Number(firstMatch)
+        if(firstDistance!==secondDistance)return (firstDistance??Infinity)-(secondDistance??Infinity)
+        return dateValue(second)-dateValue(first)
       }
       return dateValue(second)-dateValue(first)
     })
   },[products,query,category,locationFilter,condition,minimum,maximum,sort,coordinates])
   return <div className="mx-auto max-w-7xl px-4 py-8 sm:px-5 lg:px-8"><div className="mb-7"><p className="text-sm font-bold uppercase tracking-widest text-teal">Kargil & Ladakh marketplace</p><h1 className="mt-2 text-3xl font-black sm:text-4xl">Find something nearby</h1><p className="mt-2 text-ink/55">Search local items, services, and listings across Ladakh.</p></div>
-    <div className="search-toolbar grid gap-3 rounded-2xl bg-white p-3 shadow-sm md:grid-cols-[1fr_220px_auto]"><div className="search-field flex items-center gap-3 rounded-xl bg-cream px-4"><Search size={19} className="search-icon shrink-0 text-ink/40"/><input value={query} onChange={event=>setQuery(event.target.value)} className="w-full bg-transparent py-3 outline-none" placeholder="Search name, category or location..." aria-label="Search products"/>{query&&<button type="button" className="search-clear" onClick={()=>setQuery('')} aria-label="Clear search"><X size={15}/></button>}</div><LocationSelect value={locationFilter} onChange={value=>{setLocationFilter(value);setSelectedLocation(value);updateQuery('location',value)}} compact/><div className="flex gap-2"><select aria-label="Sort listings" value={sort} onChange={event=>setSort(event.target.value)} className="min-w-0 flex-1 rounded-xl border border-ink/10 bg-white px-3 text-sm font-semibold"><option value="newest">Newest</option><option value="price-asc">Price: Low to High</option><option value="price-desc">Price: High to Low</option><option value="nearby">Nearest First</option></select><button onClick={()=>setNearby()} className="grid min-h-11 min-w-11 place-items-center rounded-xl border border-ink/10 text-teal" title="Use my location" aria-label="Use my location"><LocateFixed size={18}/></button></div>
+    <div className="search-toolbar grid gap-3 rounded-2xl bg-white p-3 shadow-sm md:grid-cols-[1fr_220px_auto]"><div className="search-field flex items-center gap-3 rounded-xl bg-cream px-4"><Search size={19} className="search-icon shrink-0 text-ink/40"/><input value={query} onChange={event=>setQuery(event.target.value)} className="w-full bg-transparent py-3 outline-none" placeholder="Search name, category or location..." aria-label="Search products"/>{query&&<button type="button" className="search-clear" onClick={()=>setQuery('')} aria-label="Clear search"><X size={15}/></button>}</div><LocationSelect value={locationFilter} onChange={value=>{setLocationFilter(value);setSelectedLocation(value);updateQuery('location',value)}} compact/><div className="flex gap-2"><select aria-label="Sort listings" value={sort} onChange={event=>setSort(event.target.value)} className="min-w-0 flex-1 rounded-xl border border-ink/10 bg-white px-3 text-sm font-semibold"><option value="newest">Newest</option><option value="price-asc">Price: Low to High</option><option value="price-desc">Price: High to Low</option>{coordinates&&<option value="nearby">Nearest First</option>}</select><button onClick={()=>setNearby()} className="grid min-h-11 min-w-11 place-items-center rounded-xl border border-ink/10 text-teal" title="Use my location" aria-label="Use my location"><LocateFixed size={18}/></button></div>
       <button onClick={()=>setShowFilters(value=>!value)} aria-expanded={showFilters} className="flex items-center justify-center gap-2 rounded-xl border border-ink/10 px-4 py-3 text-sm font-bold md:col-span-3"><SlidersHorizontal size={17}/>{showFilters?'Hide filters':'More filters'}</button>
       {showFilters&&<div className="grid gap-3 border-t border-ink/5 pt-3 sm:grid-cols-2 lg:grid-cols-4"><label>Category<select value={category} onChange={event=>updateQuery('category',event.target.value)}><option>All</option>{categoryData.map(item=><option key={item.name}>{item.name}</option>)}</select></label><label>Condition<select value={condition} onChange={event=>setCondition(event.target.value)}><option>All conditions</option><option>New</option><option>Used</option></select></label><label>Minimum price<input type="number" min="0" value={minimum} onChange={event=>setMinimum(event.target.value)} placeholder="₹ 0"/></label><label>Maximum price<input type="number" min="0" value={maximum} onChange={event=>setMaximum(event.target.value)} placeholder="No maximum"/></label></div>}
     </div>
@@ -786,24 +803,57 @@ function Product({products,favorites,toggleFavorite,user}) {
       nav(`/messages?conversation=${encodeURIComponent(conversation.id)}`)
     } catch(err) { setError(err.message) } finally { setBusy(false) }
   }
-  return <div className="mx-auto max-w-6xl px-4 py-7 sm:px-5 sm:py-10 lg:px-8"><Link to="/marketplace" className="text-sm font-bold text-teal">← Back to marketplace</Link><div className="mt-6 grid gap-8 lg:grid-cols-2 lg:gap-10"><div><img className="aspect-[4/3] max-h-[560px] w-full rounded-3xl bg-white object-contain shadow-xl" src={gallery[selectedImage]} alt={`${product.title}, photo ${selectedImage+1}`}/>{gallery.length>1&&<div className="mt-4 grid grid-cols-4 gap-3">{gallery.map((image,index)=><button key={`${image}-${index}`} onClick={()=>setSelectedImage(index)} className={`overflow-hidden rounded-xl border-2 ${selectedImage===index?'border-teal':'border-transparent'}`} aria-label={`Show photo ${index+1}`} aria-pressed={selectedImage===index}><img loading="lazy" className="aspect-square w-full object-cover" src={image} alt={`${product.title} photo ${index+1}`}/></button>)}</div>}</div>
-    <div className="py-2"><div className="flex items-start justify-between gap-3"><div><span className="rounded-full bg-mint px-3 py-1 text-xs font-bold text-teal">{canonicalCategory(product.category)}</span><h1 className="mt-3 text-3xl font-black sm:text-4xl">{product.title}</h1></div><div className="flex gap-2"><button onClick={()=>toggleFavorite(product.id)} className="grid h-11 w-11 shrink-0 place-items-center rounded-full border bg-white" aria-label={favorites.includes(product.id)?'Remove from wishlist':'Save to wishlist'}>{favorites.includes(product.id)?<Heart fill="#f9735b" className="text-coral"/>:<Heart/>}</button><button onClick={shareListing} className="grid h-11 w-11 shrink-0 place-items-center rounded-full border bg-white" aria-label="Share listing"><Share2 size={18}/></button></div></div>
-      <p className="mt-4 text-3xl font-black">{formatINR(product.price)}</p><p className="mt-5 whitespace-pre-wrap leading-relaxed text-ink/70">{product.description}</p>
-      {product.tags?.length>0&&<div className="mt-4 flex flex-wrap gap-2">{product.tags.map(tag=><span key={tag} className="rounded-full bg-cream px-3 py-1 text-xs font-semibold text-ink/65">#{tag}</span>)}</div>}
-      <div className="my-6 grid grid-cols-2 gap-3 text-sm"><div className="rounded-xl bg-white p-4"><p className="text-xs text-ink/45">Condition</p><b>{product.condition||'Not specified'}</b></div><div className="rounded-xl bg-white p-4"><p className="text-xs text-ink/45">Location</p><b className="flex items-center gap-1"><MapPin size={14} className="text-teal"/>{product.location||'Ladakh'}</b></div><div className="rounded-xl bg-white p-4"><p className="text-xs text-ink/45">Posted</p><b>{dateValue(product)?new Date(dateValue(product)).toLocaleDateString():'Date unavailable'}</b></div></div>
-        <div className="flex items-center gap-3 border-y py-5"><div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full bg-coral font-bold text-white">{sellerInfo?.avatar?<img src={sellerInfo.avatar} alt="" className="h-full w-full object-cover"/>:product.initials||product.seller?.slice(0,2).toUpperCase()}</div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><Link to={product.sellerId?`/seller/${product.sellerId}`:'#'} onClick={event=>{if(!product.sellerId)event.preventDefault()}} className="font-bold hover:text-teal">{sellerInfo?.name||product.seller}</Link>{sellerInfo?.verified&&<span className="flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-[11px] font-bold text-blue-700"><BadgeCheck size={13}/>Verified</span>}</div><p className="mt-1 flex items-center gap-1 text-xs text-ink/50"><Star size={12} fill="#fbbf24" className="text-yellow-400"/> {sellerRating.count?sellerRating.average.toFixed(1):'No ratings yet'} · {sellerRating.count} ratings</p>{product.sellerId&&<Link to={`/seller/${product.sellerId}`} className="mt-1 inline-block text-xs font-bold text-teal">View seller profile</Link>}</div></div>
-      {sellerDataError&&<p role="alert" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm font-semibold text-amber-900">{sellerDataError}</p>}<div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><ShieldAlert size={17} className="mr-2 inline"/>Never send money before verifying the product and seller. Meet and inspect in person.</div>
-      <label className="mt-5">Your offer (₹), optional<input type="number" min="1" max={product.price} value={offer} onChange={event=>setOffer(event.target.value)} placeholder={`Asking price ${formatINR(product.price)}`}/></label><p className="mt-2 text-xs text-ink/50">Your message and offer go directly to {product.seller}.</p>
-      {error&&<div role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">{error}{!user&&<Link to="/login" onClick={()=>sessionStorage.setItem('campuskart-after-auth',`/product/${product.id}`)} className="ml-2 underline">Log in</Link>}</div>}{shareMessage&&<p className="mt-2 text-sm font-semibold text-teal">{shareMessage}</p>}
-      <div className="mt-4 grid grid-cols-2 gap-2">{product.contactPhone&&product.contactPreference==='call'&&<a href={`tel:${product.contactPhone}`} className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-teal/20 bg-white px-3 text-sm font-bold text-teal"><Phone size={17}/>Call seller</a>}{product.contactPhone&&product.contactPreference==='whatsapp'&&<a target="_blank" rel="noreferrer" href={`https://wa.me/${String(product.contactPhone).replace(/\D/g,'')}?text=${encodeURIComponent(`Hello, I am interested in ${product.title} on Kargil Marketplace.`)}`} className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-green-200 bg-white px-3 text-sm font-bold text-green-700">WhatsApp seller</a>}<button onClick={startConversation} disabled={busy} aria-busy={busy} className="col-span-2 min-h-12 rounded-xl bg-teal py-3 font-bold text-white shadow-lg hover:bg-teal/90 disabled:opacity-60">{busy?'Sending request…':'Message seller'}</button></div>
-      {product.sellerId&&<button onClick={()=>setShowReport(true)} className="mt-4 flex items-center gap-2 text-sm font-semibold text-red-700"><Flag size={15}/>Report listing</button>}
-    </div></div>{showReport&&<ReportDialog targetType="listing" targetId={String(product.id)} targetName={product.title} user={user} onClose={()=>setShowReport(false)} onLogin={()=>{sessionStorage.setItem('campuskart-after-auth',`/product/${product.id}`);nav('/login')}}/>}</div>
+  return <div className="product-detail-page mx-auto max-w-7xl px-4 py-7 sm:px-5 sm:py-10 lg:px-8">
+    <Link to="/marketplace" className="detail-back-link">← Back to marketplace</Link>
+    <div className="product-detail-layout mt-6">
+      <section className="product-gallery" aria-label="Product photos">
+        <div className="product-gallery-main">
+          {gallery[0]?<img src={gallery[selectedImage]} alt={`${product.title}, photo ${selectedImage+1}`}/>:<div className="product-gallery-placeholder"><Package size={42}/><span>Photos unavailable</span></div>}
+          <span className="product-gallery-index">{String(selectedImage+1).padStart(2,'0')} <i/> {String(gallery.length).padStart(2,'0')}</span>
+        </div>
+        {gallery.length>1&&<div className="product-gallery-thumbs">{gallery.map((image,index)=><button key={`${image}-${index}`} onClick={()=>setSelectedImage(index)} className={selectedImage===index?'is-selected':''} aria-label={`Show photo ${index+1}`} aria-pressed={selectedImage===index}><img loading="lazy" src={image} alt={`${product.title} photo ${index+1}`}/></button>)}</div>}
+      </section>
+      <section className="product-detail-copy">
+        <div className="product-detail-heading">
+          <div><p className="eyebrow">{canonicalCategory(product.category)}</p><h1>{product.title}</h1></div>
+          <div className="product-detail-icon-actions"><button type="button" onClick={()=>toggleFavorite(product.id)} aria-label={favorites.includes(product.id)?'Remove from wishlist':'Save to wishlist'} aria-pressed={favorites.includes(product.id)}>{favorites.includes(product.id)?<Heart size={18} fill="currentColor"/>:<Heart size={18}/>}</button><button type="button" onClick={shareListing} aria-label="Share listing"><Share2 size={18}/></button></div>
+        </div>
+        <p className="product-detail-price">{formatINR(product.price)}</p>
+        <div className="product-detail-facts"><span><MapPin size={15}/>{product.location||'Ladakh'}</span><i/>{product.condition||'Condition not specified'}<i/>{dateValue(product)?new Date(dateValue(product)).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}):'Date unavailable'}</div>
+        <p className="product-detail-description">{product.description}</p>
+        {product.tags?.length>0&&<div className="product-detail-tags">{product.tags.map(tag=><span key={tag}>#{tag}</span>)}</div>}
+        <section className="seller-trust-panel">
+          <div className="seller-trust-avatar">{sellerInfo?.avatar?<img src={sellerInfo.avatar} alt=""/>:<span>{(sellerInfo?.name||product.seller||'?').trim().split(/\s+/).slice(0,2).map(part=>part[0]).join('').toUpperCase()}</span>}</div>
+          <div className="seller-trust-copy"><div className="seller-trust-name"><Link to={product.sellerId?`/seller/${product.sellerId}`:'#'} onClick={event=>{if(!product.sellerId)event.preventDefault()}}>{sellerInfo?.name||product.seller}</Link>{(sellerInfo?.emailVerified||sellerInfo?.phoneVerified)&&<span className="seller-verified"><BadgeCheck size={14}/>Verified contact</span>}</div><p><Star size={14} fill="currentColor"/>{sellerRating.count?`${sellerRating.average.toFixed(1)} · ${sellerRating.count} ${sellerRating.count===1?'rating':'ratings'}`:'No ratings yet'}</p></div>
+          {product.sellerId&&<Link to={`/seller/${product.sellerId}`} className="seller-profile-link">View profile <ArrowRight size={14}/></Link>}
+        </section>
+        {sellerDataError&&<Notice kind="warning" className="mt-4">{sellerDataError}</Notice>}
+        <div className="product-safety-note"><ShieldAlert size={17}/><p><strong>Meet with care.</strong> Inspect the item in person and avoid sending money before you have verified it.</p></div>
+        <div className="product-contact-panel">
+          <p className="eyebrow">Make it yours</p>
+          <label>Your offer <span>(optional)</span><input type="number" min="1" max={product.price} value={offer} onChange={event=>setOffer(event.target.value)} placeholder={`Asking price ${formatINR(product.price)}`}/></label>
+          <p className="product-offer-hint">Your message and offer go directly to {product.seller}.</p>
+          {error&&<Notice kind="error" className="mt-3">{error}{!user&&<Link to="/login" onClick={()=>sessionStorage.setItem('campuskart-after-auth',`/product/${product.id}`)} className="ml-2 underline">Log in</Link>}</Notice>}
+          {shareMessage&&<Notice kind="success" className="mt-3">{shareMessage}</Notice>}
+          <div className="product-contact-actions">
+            {product.contactPhone&&product.contactPreference==='call'&&<a href={`tel:${product.contactPhone}`}><Phone size={17}/>Call seller</a>}
+            {product.contactPhone&&product.contactPreference==='whatsapp'&&<a target="_blank" rel="noreferrer" href={`https://wa.me/${String(product.contactPhone).replace(/\D/g,'')}?text=${encodeURIComponent(`Hello, I am interested in ${product.title} on Kargil Marketplace.`)}`}>WhatsApp seller</a>}
+            <button type="button" onClick={startConversation} disabled={busy||product.status==='Sold'} aria-busy={busy}>{busy?<LoaderCircle size={16} className="animate-spin"/>:null}{product.status==='Sold'?'This item is sold':busy?'Sending request…':'Message seller'}</button>
+          </div>
+          {product.sellerId&&<button type="button" onClick={()=>setShowReport(true)} className="product-report-link"><Flag size={14}/>Report listing</button>}
+        </div>
+      </section>
+    </div>
+    {showReport&&<ReportDialog targetType="listing" targetId={String(product.id)} targetName={product.title} user={user} onClose={()=>setShowReport(false)} onLogin={()=>{sessionStorage.setItem('campuskart-after-auth',`/product/${product.id}`);nav('/login')}}/>}
+  </div>
 }
 function Sell({setProducts,user,selectedLocation,categoryData=categories}) {
   const nav=useNavigate()
   const [form,setForm]=useState({title:'',price:'',category:'Books & Study',condition:'Used',description:'',location:selectedLocation==='All locations'?'Kargil':selectedLocation,contactPreference:'chat',contactPhone:'',tags:''})
   const [images,setImages]=useState([])
   const [coordinates,setCoordinates]=useState(null)
+  const [previewExpanded,setPreviewExpanded]=useState(false)
+  const [dragging,setDragging]=useState(false)
   const [done,setDone]=useState(false)
   const [busy,setBusy]=useState(false)
   const [error,setError]=useState('')
@@ -818,9 +868,7 @@ function Sell({setProducts,user,selectedLocation,categoryData=categories}) {
     if(!navigator.geolocation){setError('Location services are not available in this browser.');return}
     navigator.geolocation.getCurrentPosition(position=>{setCoordinates({latitude:position.coords.latitude,longitude:position.coords.longitude});setError('')},()=>setError('Location permission was not granted. You can still select your town.'),{enableHighAccuracy:false,timeout:10000})
   }
-  const imageUpload=async event=>{
-    const files=Array.from(event.target.files||[])
-    event.target.value=''
+  const addImages=async files=>{
     if(images.length+files.length>4){setError('Choose up to 4 photos for one listing.');return}
     setError('')
     try {
@@ -828,6 +876,11 @@ function Sell({setProducts,user,selectedLocation,categoryData=categories}) {
       setImages(current=>current.concat(compressed).slice(0,4))
     }
     catch(err){setError(err.message)}
+  }
+  const imageUpload=async event=>{
+    const files=Array.from(event.target.files||[])
+    event.target.value=''
+    await addImages(files)
   }
   const submit=async event=>{
     event.preventDefault();setError('')
@@ -845,7 +898,46 @@ function Sell({setProducts,user,selectedLocation,categoryData=categories}) {
       setDone(true);setTimeout(()=>nav('/my-listings'),1200)
     } catch(err){setError(err.message)} finally {setBusy(false)}
   }
-  return <div className="mx-auto max-w-3xl px-4 py-8 sm:px-5 sm:py-12"><p className="text-sm font-bold uppercase tracking-widest text-teal">Sell locally</p><h1 className="mt-2 text-3xl font-black sm:text-4xl">Create a listing</h1><p className="mt-2 text-ink/55">Add clear details so buyers around Kargil can find it.</p>{!user&&<p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-800">Please log in before publishing a listing.</p>}<form onSubmit={submit} className="mt-7 space-y-5 rounded-3xl bg-white p-4 shadow-sm sm:p-6"><label>Product title<input required maxLength="100" name="title" value={form.title} onChange={update} placeholder="e.g. Handwoven wool shawl"/></label><div className="grid gap-5 sm:grid-cols-2"><label>Price (₹)<input required type="number" min="1" step="1" name="price" value={form.price} onChange={update} placeholder="Enter asking price"/></label><label>Category<select name="category" value={form.category} onChange={update}>{categoryData.map(category=><option key={category.name}>{category.name}</option>)}</select></label></div><div className="grid gap-5 sm:grid-cols-2"><label>Condition<select name="condition" value={form.condition} onChange={update}><option>New</option><option>Used</option></select></label><label>Location<input required list="ladakh-locations" name="location" value={form.location} onChange={update} placeholder="Town or area"/><datalist id="ladakh-locations">{locations.map(place=><option key={place} value={place}/>)}</datalist></label></div><button type="button" onClick={captureLocation} className="flex min-h-10 items-center gap-2 rounded-xl border border-teal/20 px-4 py-2 text-sm font-bold text-teal"><Navigation size={16}/>{coordinates?'Precise location attached':'Add precise location (optional)'}</button><label>Description<textarea required maxLength="2000" name="description" value={form.description} onChange={update} rows="4" placeholder="Describe its condition, features, and pickup details"/></label><label>Tags, separated by commas<input name="tags" value={form.tags} onChange={update} placeholder="winter, handmade, books"/></label><div className="grid gap-5 sm:grid-cols-2"><label>Seller contact preference<select name="contactPreference" value={form.contactPreference} onChange={update}><option value="chat">In-app chat</option><option value="call">Phone call</option><option value="whatsapp">WhatsApp</option></select></label>{form.contactPreference!=='chat'&&<label>Contact phone<input type="tel" required name="contactPhone" value={form.contactPhone} onChange={update} placeholder="+91..."/></label>}</div><label className="rounded-2xl border-2 border-dashed p-5 text-center sm:p-8"><b>Upload item photos (up to 4)</b><span className="mt-1 block text-xs font-normal text-ink/50">Images are compressed before upload.</span><input required={images.length===0} type="file" accept="image/*" multiple onChange={imageUpload} className="mx-auto mt-3 max-w-full border-0 bg-transparent p-0"/></label>{images.length>0&&<div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{images.map((image,index)=><div key={`${index}-${image.slice(-16)}`} className="relative"><img src={image} alt={`Listing photo preview ${index+1}`} className="aspect-square w-full rounded-xl object-cover"/><button type="button" onClick={()=>setImages(current=>current.filter((_,i)=>i!==index))} className="absolute right-2 top-2 rounded-full bg-white px-3 py-2 text-xs font-bold text-red-600">Remove</button></div>)}</div>}{error&&<p role="alert" className="rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}{done&&<p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">Listing published successfully. Opening My Listings…</p>}<button disabled={done||busy} className="min-h-12 w-full rounded-xl bg-teal py-4 font-bold text-white disabled:opacity-60">{busy?'Saving listing…':done?'Listing published!':'Publish listing'}</button></form></div>
+  return <div className="listing-studio mx-auto max-w-7xl px-4 py-8 sm:px-5 sm:py-12 lg:px-8">
+    <div className="listing-studio-heading"><div><p className="eyebrow">Seller studio</p><h1>Create a listing</h1><p>Share something useful with the Kargil and Ladakh community.</p></div><span className="listing-studio-count">01 <i/> 06</span></div>
+    {!user&&<Notice kind="warning" className="mt-5">Please log in before publishing a listing.</Notice>}
+    <div className="listing-studio-layout mt-7">
+      <form onSubmit={submit} className="listing-form">
+        <section className={`listing-form-section ${dragging?'is-dragging':''}`} onDragOver={event=>{event.preventDefault();setDragging(true)}} onDragLeave={event=>{if(!event.currentTarget.contains(event.relatedTarget))setDragging(false)}} onDrop={event=>{event.preventDefault();setDragging(false);addImages(Array.from(event.dataTransfer.files||[]).filter(file=>file.type.startsWith('image/')))}} aria-labelledby="listing-photos-heading">
+          <div className="listing-step"><span>01</span><div><h2 id="listing-photos-heading">Photos</h2><p>Good light and a clear view help your item stand out.</p></div><span className="listing-step-meta">{images.length} / 4</span></div>
+          <label className="listing-upload-zone"><b>Drop photos here, or browse</b><span>Up to 4 images · compressed before upload · first photo is the cover</span><input required={images.length===0} type="file" accept="image/*" multiple onChange={imageUpload}/></label>
+          {images.length>0&&<div className="listing-photo-grid">{images.map((image,index)=><div key={`${index}-${image.slice(-16)}`} className="listing-photo-preview"><img src={image} alt={`Listing photo preview ${index+1}`}/>{index===0?<span className="listing-photo-cover">Cover photo</span>:<button type="button" className="listing-photo-make-cover" onClick={()=>setImages(current=>{const selected=current[index];return [selected,...current.filter((_,photoIndex)=>photoIndex!==index)]})}>Make cover</button>}<button type="button" onClick={()=>setImages(current=>current.filter((_,photoIndex)=>photoIndex!==index))} aria-label={`Remove photo ${index+1}`}><X size={15}/></button></div>)}</div>}
+        </section>
+        <section className="listing-form-section">
+          <div className="listing-step"><span>02</span><div><h2>Details</h2><p>Be specific so buyers know exactly what to expect.</p></div></div>
+          <label>Product title<input required maxLength="100" name="title" value={form.title} onChange={update} placeholder="e.g. Handwoven wool shawl"/></label>
+          <div className="grid gap-5 sm:grid-cols-2"><label>Category<select name="category" value={form.category} onChange={update}>{categoryData.filter(category=>category.active!==false).map(category=><option key={category.name}>{category.name}</option>)}</select></label><label>Condition<select name="condition" value={form.condition} onChange={update}><option>New</option><option>Used</option></select></label></div>
+          <label>Description<textarea required maxLength="2000" name="description" value={form.description} onChange={update} rows="5" placeholder="Describe its condition, features, and pickup details"/><span className="listing-character-count">{form.description.length} / 2,000 characters</span></label>
+          <label>Tags <span className="font-normal text-ink/45">(separated by commas)</span><input name="tags" value={form.tags} onChange={update} placeholder="winter, handmade, books"/></label>
+        </section>
+        <section className="listing-form-section">
+          <div className="listing-step"><span>03</span><div><h2>Price</h2><p>Choose a fair price for your item.</p></div></div>
+          <label>Asking price (₹)<input required type="number" min="1" step="1" name="price" value={form.price} onChange={update} placeholder="Enter asking price"/></label>
+        </section>
+        <section className="listing-form-section">
+          <div className="listing-step"><span>04</span><div><h2>Location</h2><p>Help nearby buyers understand where to meet.</p></div></div>
+          <label>Town or area<input required list="ladakh-locations" name="location" value={form.location} onChange={update} placeholder="Town or area"/><datalist id="ladakh-locations">{locations.map(place=><option key={place} value={place}/>)}</datalist></label>
+          <button type="button" onClick={captureLocation} className="listing-location-button"><Navigation size={16}/>{coordinates?'Precise location attached':'Add precise location (optional)'}</button>
+        </section>
+        <section className="listing-form-section">
+          <div className="listing-step"><span>05</span><div><h2>Contact</h2><p>Choose how interested buyers can reach you.</p></div></div>
+          <div className="grid gap-5 sm:grid-cols-2"><label>Contact preference<select name="contactPreference" value={form.contactPreference} onChange={update}><option value="chat">In-app chat</option><option value="call">Phone call</option><option value="whatsapp">WhatsApp</option></select></label>{form.contactPreference!=='chat'&&<label>Contact phone<input type="tel" required name="contactPhone" value={form.contactPhone} onChange={update} placeholder="+91..."/></label>}</div>
+        </section>
+        {error&&<Notice kind="error">{error}</Notice>}
+        {done&&<Notice kind="success" title="Listing published">Your item is live. Opening My Listings…</Notice>}
+        <section className="listing-publish-section"><div className="listing-step"><span>06</span><div><h2>Publish</h2><p>Review your details, then share your listing.</p></div></div><button disabled={done||busy} aria-busy={busy} className="listing-publish-button">{busy?<><LoaderCircle size={17} className="animate-spin"/>Saving listing…</>:done?'Listing published!':'Publish listing'}{!busy&&!done&&<ArrowRight size={17}/>}</button><p>Your listing will be visible to people browsing the marketplace.</p></section>
+      </form>
+      <aside className={`listing-preview ${previewExpanded?'is-expanded':''}`}>
+        <button type="button" className="listing-preview-toggle" onClick={()=>setPreviewExpanded(value=>!value)} aria-expanded={previewExpanded}><span>PREVIEW</span><ChevronDown size={17}/></button>
+        <div className="listing-preview-content"><p className="eyebrow">How it will appear</p><article className="listing-preview-card"><div className="listing-preview-image">{images[0]?<img src={images[0]} alt="Preview of your listing"/>:<div><Package size={28}/><span>Your cover photo</span></div>}{images.length>1&&<span className="listing-preview-photo-count">{images.length} photos</span>}</div><div className="listing-preview-copy"><p>{form.category}</p><h3>{form.title||'Your item title'}</h3><strong>{form.price?formatINR(form.price):'Add a price'}</strong><span><MapPin size={13}/>{form.location||'Add a location'} <i/> {form.condition}</span></div></article><div className="listing-preview-note"><Info size={15}/><span>This preview stays on your device until you publish.</span></div></div>
+      </aside>
+    </div>
+  </div>
 }
 function Dashboard({products,user}) {
   const [rating,setRating]=useState({average:0,count:0})
@@ -858,16 +950,25 @@ function Dashboard({products,user}) {
   if(!user)return <div className="mx-auto max-w-2xl px-5 py-20 text-center"><h1 className="text-3xl font-black">Log in to see your seller dashboard</h1><Link to="/login" className="mt-5 inline-block rounded-xl bg-teal px-5 py-3 font-bold text-white">Log in</Link></div>
   const active=mine.filter(product=>!product.status||product.status==='Active').length
   const sold=mine.filter(product=>product.status==='Sold').length
-  return <div className="mx-auto max-w-7xl px-4 py-8 sm:px-5 lg:px-8"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm font-bold uppercase tracking-widest text-teal">Seller hub</p><h1 className="mt-2 text-3xl font-black sm:text-4xl">Welcome, {user.name}</h1><p className="mt-2 text-ink/55">A clear view of your listings and seller rating.</p></div><Link to="/sell" className="rounded-xl bg-teal px-4 py-3 text-sm font-bold text-white"><Plus size={16} className="mr-1 inline"/>New listing</Link></div>{ratingError&&<p role="alert" className="mt-4 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-900">Unable to load seller ratings: {ratingError}</p>}<div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><Stat icon={Package} label="Your listings" value={mine.length} trend="Manage listings"/><Stat icon={TrendingUp} label="Active listings" value={active} trend="Available now"/><Stat icon={CheckCircle2} label="Sold items" value={sold} trend="Completed"/><Stat icon={Star} label="Seller rating" value={rating.count?rating.average.toFixed(1):'—'} trend={`${rating.count} ratings`}/></div><div className="mt-9 flex items-center justify-between"><h2 className="text-2xl font-black">Your recent listings</h2><Link to="/my-listings" className="text-sm font-bold text-teal">Manage all</Link></div>{mine.length?<div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4">{mine.slice(0,4).map(product=><ProductCard key={product.id} product={product} favorite={false}/>)}</div>:<div className="mt-4 rounded-2xl bg-white p-8 text-center text-sm text-ink/55">You have not posted any listings yet. <Link to="/sell" className="font-bold text-teal">Create your first listing.</Link></div>}</div>
+  return <div className="seller-studio-page mx-auto max-w-7xl px-4 py-8 sm:px-5 lg:px-8"><div className="seller-studio-heading"><div><p className="eyebrow">Seller studio</p><h1>Welcome, {user.name}</h1><p>A clear view of your listings and seller rating.</p></div><Link to="/sell" className="button-dark min-h-11 px-4 py-3 text-sm font-semibold"><Plus size={16}/>New listing</Link></div>{ratingError&&<Notice kind="warning" className="mt-4">Unable to load seller ratings: {ratingError}</Notice>}<div className="seller-studio-stats mt-7"><Stat icon={Package} label="Your listings" value={mine.length} trend="Manage listings"/><Stat icon={TrendingUp} label="Active listings" value={active} trend="Available now"/><Stat icon={CheckCircle2} label="Sold items" value={sold} trend="Completed"/><Stat icon={Star} label="Seller rating" value={rating.count?rating.average.toFixed(1):'—'} trend={`${rating.count} ratings`}/></div><div className="mt-9 flex items-center justify-between"><h2 className="editorial-heading">Your recent listings</h2><Link to="/my-listings" className="text-link">Manage all <ArrowRight size={15}/></Link></div>{mine.length?<div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4">{mine.slice(0,4).map(product=><ProductCard key={product.id} product={product} favorite={false}/>)}</div>:<div className="empty-state mt-4"><Package size={28}/><h2>Your seller studio is ready</h2><p>You have not posted a listing yet. Share an item to start connecting with nearby buyers.</p><Link to="/sell" className="text-link">Create your first listing <ArrowRight size={15}/></Link></div>}</div>
 }
-function Stat({icon:Icon,label,value,trend}){return <div className="rounded-2xl bg-white p-5 shadow-sm"><Icon className="text-teal" size={21}/><p className="mt-5 text-sm text-ink/50">{label}</p><div className="mt-1 flex items-end justify-between"><b className="text-3xl">{value}</b><span className="text-xs font-bold text-teal">{trend}</span></div></div>}
+function Stat({icon:Icon,label,value,trend}){return <div className="seller-stat"><Icon size={20}/><p>{label}</p><div><b>{value}</b><span>{trend}</span></div></div>}
 function Profile({user,setUser,products,favorites}) { const [editing,setEditing]=useState(false); const [form,setForm]=useState({name:user?.name||'',phone:user?.phone||'',college:user?.college||'',area:user?.area||'',location:user?.location||''}); const [error,setError]=useState(''); const [saved,setSaved]=useState(false); useEffect(()=>setForm({name:user?.name||'',phone:user?.phone||'',college:user?.college||'',area:user?.area||'',location:user?.location||''}),[user]); const update=e=>setForm({...form,[e.target.name]:e.target.value}); const save=async e=>{e.preventDefault();setError('');try{const response=await fetch(`${API_BASE}/auth/me`,{method:'PUT',headers:{'Content-Type':'application/json',Authorization: `Bearer ${localStorage.getItem('campuskart-token')}`},body:JSON.stringify(form)});const data=await response.json();if(!response.ok)throw new Error(data.error||'Unable to update profile');setUser(data.user);localStorage.setItem('campuskart-user',JSON.stringify(data.user));setEditing(false);setSaved(true);setTimeout(()=>setSaved(false),2000)}catch(err){setError(err.message)}}; if(!user)return <div className="mx-auto max-w-2xl px-5 py-20 text-center"><h1 className="text-3xl font-black">Please log in to view your profile</h1><Link to="/login" className="mt-5 inline-block rounded-xl bg-teal px-5 py-3 font-bold text-white">Log in</Link></div>; const mine=products.filter(p=>p.sellerId===user.id||p.seller===user.name); return <div className="mx-auto max-w-5xl px-5 py-10"><div className="rounded-3xl bg-ink p-8 text-white"><div className="flex items-start gap-5"><div className="grid h-20 w-20 shrink-0 place-items-center rounded-full bg-coral text-2xl font-black">{user.name?.slice(0,2).toUpperCase()}</div><div className="min-w-0"><p className="text-white/60">Kargil Marketplace member</p><h1 className="text-3xl font-black">{user.name}</h1><p className="mt-1 text-sm text-white/70">{user.email || user.phone || 'Contact details not added'}</p><p className="text-sm text-white/60">{[user.college, user.area, user.location].filter(Boolean).join(' · ') || 'Add your location and area'}</p></div><button onClick={()=>setEditing(value=>!value)} className="ml-auto rounded-xl bg-white/10 px-4 py-2 text-sm font-bold">{editing?'Close':'Edit profile'}</button></div></div>{editing&&<form onSubmit={save} className="mt-6 grid gap-4 rounded-2xl bg-white p-6 shadow-sm sm:grid-cols-2"><input required name="name" value={form.name} onChange={update} placeholder="Full name"/><input name="phone" value={form.phone} onChange={update} placeholder="Phone number"/><input name="college" value={form.college} onChange={update} placeholder="College / organisation"/><input name="area" value={form.area} onChange={update} placeholder="Area / neighbourhood"/><input name="location" value={form.location} onChange={update} placeholder="City / location"/><button className="rounded-xl bg-teal py-3 font-bold text-white">Save changes</button>{error&&<p className="text-sm font-semibold text-red-600 sm:col-span-2">{error}</p>}{saved&&<p className="text-sm font-semibold text-teal sm:col-span-2">Profile updated successfully.</p>}</form>}<div className="mt-6 flex gap-3"><Link to="/my-listings" className="rounded-xl bg-teal px-4 py-3 text-sm font-bold text-white">My listings ({mine.length})</Link><Link to="/wishlist" className="rounded-xl bg-white px-4 py-3 text-sm font-bold shadow-sm">Wishlist ({favorites.length})</Link></div><div className="mt-8 grid gap-4 sm:grid-cols-3"><Stat icon={ShoppingBag} label="Active listings" value={mine.filter(p=>p.status!=='Sold').length} trend="Manage listings"/><Stat icon={Heart} label="Saved items" value={favorites.length} trend="Keep browsing"/><Stat icon={Star} label="Rating" value="New" trend="Build trust"/></div></div> }
 function Auth({mode,setUser}) {
   const nav=useNavigate()
+  const [params]=useSearchParams()
+  const oauthError=params.get('oauth_error')
   const [method,setMethod]=useState('email')
+  const [showPassword,setShowPassword]=useState(false)
   const [form,setForm]=useState({name:'',email:'',phone:'',password:'',location:''})
   const [error,setError]=useState('')
   const [busy,setBusy]=useState(false)
+  useEffect(()=>{
+    if(!oauthError)return
+    localStorage.removeItem('campuskart-token')
+    localStorage.removeItem('campuskart-user')
+    setUser(null)
+  },[oauthError,setUser])
   const update=event=>setForm(current=>({...current,[event.target.name]:event.target.value}))
   const google=()=>{window.location.href=`${API_BASE}/auth/google`}
   const submit=async event=>{
@@ -883,7 +984,24 @@ function Auth({mode,setUser}) {
       localStorage.setItem('campuskart-token',data.token);localStorage.setItem('campuskart-user',JSON.stringify(data.user));setUser(data.user);nav('/profile')
     }catch(err){setError(err.message)}finally{setBusy(false)}
   }
-  return <div className="mx-auto max-w-md px-5 py-16"><div className="mb-8 text-center"><h1 className="text-3xl font-black">{mode==='login'?'Welcome back':'Join Kargil Marketplace'}</h1><p className="mt-2 text-sm text-ink/55">{mode==='signup'?'Create an account with Google or email.':'Sign in to continue.'}</p></div><button type="button" onClick={google} className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl border border-ink/10 bg-white py-3.5 font-bold shadow-sm hover:bg-mint"><span className="grid h-6 w-6 place-items-center rounded-full border border-ink/10 text-sm font-black">G</span> Continue with Google</button><div className="mb-4 grid grid-cols-2 gap-2 rounded-xl bg-ink/5 p-1 text-sm font-bold"><button type="button" onClick={()=>setMethod('email')} className={`rounded-lg py-2 ${method==='email'?'bg-white text-teal shadow-sm':''}`}>Email</button><button type="button" onClick={()=>setMethod('phone')} className={`rounded-lg py-2 ${method==='phone'?'bg-white text-teal shadow-sm':''}`}>Phone number</button></div><form onSubmit={submit} className="space-y-4 rounded-3xl bg-white p-7 shadow-sm">{mode==='signup'&&<><label>Name<input required maxLength="100" name="name" value={form.name} onChange={update} placeholder="Your name"/></label><label>Area or neighbourhood<input maxLength="100" name="location" value={form.location} onChange={update} placeholder="Kargil, Drass, Sankoo…"/></label></>}{method==='phone'?<label>Phone number<input required type="tel" name="phone" value={form.phone} onChange={update} placeholder="+91 98765 43210"/></label>:<label>Email<input required type="email" name="email" value={form.email} onChange={update} placeholder="you@example.com"/></label>}<label>Password<input required minLength={mode==='signup'?8:1} maxLength="128" type="password" name="password" value={form.password} onChange={update} placeholder={mode==='signup'?'At least 8 characters':'Your password'}/></label>{error&&<p role="alert" className="text-sm font-semibold text-red-600">{error}</p>}<button disabled={busy} className="w-full rounded-xl bg-teal py-3.5 font-bold text-white disabled:opacity-60">{busy?'Please wait…':mode==='login'?'Log in':method==='phone'?'Create account with phone':'Create account'}</button><p className="text-center text-sm text-ink/55">{mode==='login'?<>New here? <Link className="font-bold text-teal" to="/signup">Create an account</Link></>:<>Already registered? <Link className="font-bold text-teal" to="/login">Log in</Link></>}</p></form></div>
+  return <div className="auth-page">
+    <section className="auth-story"><img src="https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1400&q=82" alt="Mountain ridges in the Ladakh Himalaya"/><div className="auth-story-shade"/><Link to="/" className="auth-story-brand"><span>K</span>Kargil Marketplace</Link><div className="auth-story-copy"><p className="eyebrow">A marketplace close to home</p><h2>Good things<br/><em>find their way.</em></h2><p>Buy, sell and connect with people across Kargil and Ladakh.</p></div><span className="auth-story-caption">KARGIL · LADAKH</span></section>
+    <section className="auth-panel"><div className="auth-panel-inner"><div className="auth-heading"><p className="eyebrow">{mode==='login'?'Welcome back':'Join the community'}</p><h1>{mode==='login'?'Sign in to continue':'Make yourself at home.'}</h1><p>{mode==='signup'?'Create an account to save listings and connect with local sellers.':'Your local marketplace is just ahead.'}</p></div>
+      {oauthError&&<Notice kind="warning" className="mb-4">{oauthErrorMessage(oauthError)||'Google sign-in could not be completed. Please try again.'}</Notice>}
+      <button type="button" onClick={google} className="auth-google-button"><span>G</span>Continue with Google</button>
+      <div className="auth-divider"><span>or continue with</span></div>
+      <div className="auth-method-tabs" role="tablist" aria-label="Sign in method"><button type="button" role="tab" aria-selected={method==='email'} onClick={()=>setMethod('email')}>Email</button><button type="button" role="tab" aria-selected={method==='phone'} onClick={()=>setMethod('phone')}>Phone</button></div>
+      <form onSubmit={submit} className="auth-form">
+        {mode==='signup'&&<><label>Name<input required maxLength="100" name="name" value={form.name} onChange={update} placeholder="Your name"/></label><label>Area or neighbourhood<input maxLength="100" name="location" value={form.location} onChange={update} placeholder="Kargil, Drass, Sankoo…"/></label></>}
+        {method==='phone'?<label>Phone number<input required type="tel" name="phone" value={form.phone} onChange={update} placeholder="+91 98765 43210"/></label>:<label>Email<input required type="email" name="email" value={form.email} onChange={update} placeholder="you@example.com"/></label>}
+        <label>Password<span className="auth-password-field"><input required minLength={mode==='signup'?8:1} maxLength="128" type={showPassword?'text':'password'} name="password" value={form.password} onChange={update} placeholder={mode==='signup'?'At least 8 characters':'Your password'}/><button type="button" onClick={()=>setShowPassword(value=>!value)} aria-label={showPassword?'Hide password':'Show password'}>{showPassword?'Hide':'Show'}</button></span></label>
+        {mode==='signup'&&form.password&&<div className="auth-password-strength"><span className={form.password.length>=8?'is-strong':''}/><small>{form.password.length>=8?'Meets the minimum length':'Use at least 8 characters'}</small></div>}
+        {error&&<Notice kind="error">{error}</Notice>}
+        <button disabled={busy} aria-busy={busy} className="auth-submit-button">{busy?<><LoaderCircle size={16} className="animate-spin"/>Please wait…</>:mode==='login'?'Log in':method==='phone'?'Create account with phone':'Create account'}</button>
+        <p className="auth-switch">{mode==='login'?<>New here? <Link to="/signup">Create an account</Link></>:<>Already registered? <Link to="/login">Log in</Link></>}</p>
+      </form>
+    </div></section>
+  </div>
 }
 function MyListings({products,setProducts,user}) {
   const [editing,setEditing]=useState('')
@@ -932,15 +1050,15 @@ function MyListings({products,setProducts,user}) {
   }
   if(!user)return <div className="mx-auto max-w-2xl px-5 py-20 text-center"><h1 className="text-3xl font-black">Log in to manage your listings</h1><Link to="/login" className="mt-5 inline-block rounded-xl bg-teal px-5 py-3 font-bold text-white">Log in</Link></div>
   return <div className="mx-auto max-w-7xl px-4 py-8 sm:px-5 lg:px-8"><div className="flex flex-wrap items-end justify-between gap-4"><div><h1 className="text-3xl font-black sm:text-4xl">My listings</h1><p className="mt-2 text-sm text-ink/55">{mine.length} listing{mine.length===1?'':'s'} by you</p></div><Link to="/sell" className="rounded-xl bg-teal px-4 py-3 font-bold text-white">Add listing</Link></div>{error&&<Notice kind="error" className="mt-5">{error}</Notice>}
-    {mine.length?<div className="mt-7 grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4">{mine.map(product=><article key={product.id}><ProductCard product={product} favorite={false}/><div className="mt-3 flex flex-wrap items-center justify-between gap-2"><span className="rounded-full bg-mint px-2 py-1 text-xs font-bold text-teal">{product.status||'Active'}</span><button disabled={busyId===product.id} onClick={()=>markSold(product)} className="text-xs font-bold text-teal disabled:opacity-50">Mark as {product.status==='Sold'?'active':'sold'}</button></div>{editing===product.id?<div className="mt-3 flex gap-2"><input className="min-w-0 flex-1 rounded-xl border px-2 py-2 text-sm" value={draft} onChange={event=>setDraft(event.target.value)} aria-label="Listing title"/><button disabled={busyId===product.id} onClick={()=>save(product)} className="rounded-lg bg-teal px-3 text-xs font-bold text-white">Save</button></div>:<button onClick={()=>{setEditing(product.id);setDraft(product.title)}} className="mt-3 text-xs font-bold text-teal">Edit title</button>}<button disabled={busyId===product.id} onClick={()=>setDeleteTarget(product)} className="ml-4 mt-3 text-xs font-bold text-red-700 disabled:opacity-50">Delete</button><div className="mt-2">{contactEditing===product.id?<div className="space-y-2 rounded-xl border bg-white p-3"><label className="block text-xs font-semibold">How buyers can contact you<select className="mt-1 w-full rounded-lg border p-2 text-sm" value={contactDraft.contactPreference} onChange={event=>setContactDraft(current=>({...current,contactPreference:event.target.value}))}><option value="chat">In-app chat</option><option value="call">Phone call</option><option value="whatsapp">WhatsApp</option></select></label>{contactDraft.contactPreference!=='chat'&&<label className="block text-xs font-semibold">Phone number (shown to buyers)<input className="mt-1 w-full rounded-lg border p-2 text-sm" type="tel" value={contactDraft.contactPhone} onChange={event=>setContactDraft(current=>({...current,contactPhone:event.target.value}))} placeholder="+91..."/></label>}<div className="flex gap-2"><button disabled={busyId===product.id} onClick={()=>saveContact(product)} className="flex-1 rounded-lg bg-teal px-3 py-2 text-xs font-bold text-white">Save contact</button><button onClick={()=>setContactEditing('')} className="rounded-lg border px-3 py-2 text-xs font-bold">Cancel</button></div></div>:<button onClick={()=>{setContactEditing(product.id);setContactDraft({contactPreference:product.contactPreference||'chat',contactPhone:product.contactPhone||''})}} className="text-xs font-bold text-teal">Edit contact details</button>}</div></article>)}</div>:<div className="mt-8 rounded-2xl bg-white py-16 text-center"><Package className="mx-auto text-ink/25" size={36}/><p className="mt-3 font-bold">No listings yet</p><p className="mt-1 text-sm text-ink/50">Post your first item for people nearby.</p><Link to="/sell" className="mt-5 inline-block rounded-xl bg-teal px-4 py-3 font-bold text-white">Create listing</Link></div>}
+    {mine.length?<div className="mt-7 grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4">{mine.map(product=><article key={product.id} className="seller-listing-management"><ProductCard product={product} favorite={false}/><div className="seller-listing-actions"><span className={`listing-status ${product.status==='Sold'?'is-sold':''}`}>{product.status||'Active'}</span><button disabled={busyId===product.id} onClick={()=>markSold(product)} className="seller-action-link" aria-label={`Mark ${product.title} as ${product.status==='Sold'?'active':'sold'}`}>{product.status==='Sold'?'Mark active':'Mark sold'}</button></div>{editing===product.id?<div className="mt-3 flex gap-2"><input className="min-w-0 flex-1 rounded-xl border px-2 py-2 text-sm" value={draft} onChange={event=>setDraft(event.target.value)} aria-label="Listing title"/><button disabled={busyId===product.id} onClick={()=>save(product)} className="seller-action-button">Save</button></div>:<button onClick={()=>{setEditing(product.id);setDraft(product.title)}} className="seller-action-link mt-3">Edit title</button>}<button disabled={busyId===product.id} onClick={()=>setDeleteTarget(product)} className="seller-action-link seller-action-delete ml-4 mt-3">Delete</button><div className="mt-2">{contactEditing===product.id?<div className="seller-contact-editor"><label>How buyers can contact you<select className="mt-1 w-full rounded-lg border p-2 text-sm" value={contactDraft.contactPreference} onChange={event=>setContactDraft(current=>({...current,contactPreference:event.target.value}))}><option value="chat">In-app chat</option><option value="call">Phone call</option><option value="whatsapp">WhatsApp</option></select></label>{contactDraft.contactPreference!=='chat'&&<label>Phone number (shown to buyers)<input className="mt-1 w-full rounded-lg border p-2 text-sm" type="tel" value={contactDraft.contactPhone} onChange={event=>setContactDraft(current=>({...current,contactPhone:event.target.value}))} placeholder="+91..."/></label>}<div className="flex gap-2"><button disabled={busyId===product.id} onClick={()=>saveContact(product)} className="seller-action-button flex-1">Save contact</button><button onClick={()=>setContactEditing('')} className="seller-cancel-button">Cancel</button></div></div>:<button onClick={()=>{setContactEditing(product.id);setContactDraft({contactPreference:product.contactPreference||'chat',contactPhone:product.contactPhone||''})}} className="seller-action-link">Edit contact details</button>}</div></article>)}</div>:<div className="empty-state mt-8"><Package size={30}/><h2>No listings yet</h2><p>Post your first item for people nearby.</p><Link to="/sell" className="text-link">Create listing <ArrowRight size={15}/></Link></div>}
     {deleteTarget&&<ConfirmDialog title="Delete this listing?" message={`“${deleteTarget.title}” will be permanently removed from your listings.`} confirmLabel="Delete listing" tone="danger" busy={busyId===deleteTarget.id} onCancel={()=>setDeleteTarget(null)} onConfirm={async()=>{await remove(deleteTarget);setDeleteTarget(null)}}/>}
   </div>
 }
 function Wishlist({products,favorites,toggleFavorite,user,loading=false,error='',onRetry}) {
   const saved=products.filter(product=>favorites.includes(product.id))
-  return <div className="mx-auto max-w-7xl px-5 py-10 lg:px-8"><p className="text-sm font-bold uppercase tracking-widest text-teal">Saved for later</p><h1 className="mt-2 text-4xl font-black">Your wishlist</h1><p className="mt-2 text-ink/55">Your saved listings sync with your signed-in account.</p>{loading?<LoadingState message="Loading your saved listings" className="mt-8 rounded-xl border border-ink/5 bg-white p-8 text-sm text-ink/55"/>:error?<div role="alert" className="mt-8 rounded-2xl bg-white p-8 text-center text-sm text-red-700"><p>Unable to load your wishlist: {error}</p><button onClick={onRetry} className="mt-4 rounded-xl bg-teal px-4 py-3 font-bold text-white">Try again</button></div>:saved.length?<div className="result-grid mt-9 grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4">{saved.map(product=><ProductCard key={product.id} product={product} favorite toggleFavorite={toggleFavorite}/>)}</div>:<div className="empty-state mt-10 rounded-xl py-16"><Heart size={34}/><h2>{user?'Your wishlist is empty':'Sign in to view your wishlist'}</h2><p>{user?'Tap the heart on any listing to save it.':'Saved listings are linked to your account and appear here after you sign in.'}</p>{user?<Link to="/marketplace" className="mt-4 inline-block rounded-xl bg-teal px-4 py-3 text-sm font-bold text-white">Browse marketplace</Link>:<Link to="/login" className="mt-4 inline-block rounded-xl bg-teal px-4 py-3 text-sm font-bold text-white">Log in</Link>}</div>}</div>
+  return <div className="wishlist-page mx-auto max-w-7xl px-5 py-10 lg:px-8"><div className="wishlist-heading"><div><p className="eyebrow">Saved for later</p><h1>Your collection.</h1><p>Your saved listings sync with your signed-in account.</p></div><span>{saved.length.toString().padStart(2,'0')} <i/> SAVED</span></div>{loading?<LoadingState message="Loading your saved listings" className="mt-8 rounded-xl border border-ink/5 bg-white p-8 text-sm text-ink/55"/>:error?<Notice kind="error" className="mt-8">Unable to load your wishlist: {error}<button onClick={onRetry} className="ml-3 underline">Try again</button></Notice>:saved.length?<div className="result-grid mt-9 grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4">{saved.map(product=><ProductCard key={product.id} product={product} favorite toggleFavorite={toggleFavorite}/>)}</div>:<div className="empty-state mt-10"><Heart size={30}/><h2>{user?'A little room for discovery.':'Your collection begins here.'}</h2><p>{user?'Tap the heart on any listing to save it for later.':'Sign in to keep your saved listings together.'}</p>{user?<Link to="/marketplace" className="text-link">Browse marketplace <ArrowRight size={15}/></Link>:<Link to="/login" className="text-link">Log in to continue <ArrowRight size={15}/></Link>}</div>}</div>
 }
-function AdminDashboard({products,setProducts,user,categoryData,setCategoryData}) {
+function LegacyAdminDashboard({products,setProducts,user,categoryData,setCategoryData}) {
   const [users,setUsers]=useState([])
   const [reports,setReports]=useState([])
   const [stats,setStats]=useState(null)
@@ -1060,7 +1178,7 @@ function AdminDashboard({products,setProducts,user,categoryData,setCategoryData}
   }
   if(user?.role!=='admin'&&!loading)return <div className="mx-auto max-w-2xl px-5 py-20 text-center"><ShieldAlert className="mx-auto text-amber-600" size={38}/><h1 className="mt-4 text-2xl font-black">Administrator access required</h1><p className="mt-2 text-sm text-ink/55">{error||'This account does not have permission to view marketplace administration.'}</p></div>
   const pending=reports.filter(report=>['Pending','Reviewing','pending','reviewed'].includes(report.status))
-  return <div className="mx-auto max-w-7xl px-4 py-8 sm:px-5 lg:px-8"><p className="text-sm font-bold uppercase tracking-widest text-teal">Marketplace moderation</p><h1 className="mt-2 text-3xl font-black sm:text-4xl">Admin dashboard</h1><p className="mt-2 text-sm text-ink/55">User and report data comes from the connected marketplace API.</p>{error&&<p role="alert" className="mt-5 rounded-xl bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</p>}
+  return <div className="mx-auto max-w-7xl px-4 py-8 sm:px-5 lg:px-8"><p className="text-sm font-bold uppercase tracking-widest text-teal">Marketplace moderation</p><h1 className="mt-2 text-3xl font-black sm:text-4xl">Admin dashboard</h1><p className="mt-2 text-sm text-ink/55">User and report data comes from the connected marketplace API.</p>{error&&<Notice kind="error" className="mt-5">{error}</Notice>}
     <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5"><Stat icon={UserRound} label="Users" value={loading?'…':stats?.users??users.length} trend="Registered"/><Stat icon={Package} label="Listings" value={stats?.listings??products.length} trend="Current"/><Stat icon={TrendingUp} label="Active listings" value={stats?.activeListings??products.filter(product=>!product.status||product.status==='Active').length} trend="Available"/><Stat icon={CheckCircle2} label="Sold items" value={stats?.soldProducts??products.filter(product=>product.status==='Sold').length} trend="Completed"/><Stat icon={Flag} label="Open reports" value={loading?'…':stats?.reports??pending.length} trend="Needs review"/></div>
     <section className="mt-8 rounded-2xl bg-white p-5 shadow-sm"><div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-black">Reported listings & sellers</h2><p className="mt-1 text-sm text-ink/50">Review reports submitted by authenticated users.</p></div><button onClick={()=>{setLoading(true);load()}} className="rounded-xl border px-4 py-2 text-sm font-bold">Refresh</button></div>
       {loading?<div className="mt-5 space-y-3">{[1,2,3].map(item=><div key={item} className="skeleton h-16 rounded-xl"/>)}</div>:pending.length?<div className="mt-4 space-y-3">{pending.map(report=><article key={report.id} className="rounded-xl border border-ink/5 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><span className="rounded-full bg-orange-50 px-2 py-1 text-xs font-bold text-orange-800">{report.targetType} · {report.status}</span><h3 className="mt-2 font-bold">{report.targetName}</h3><p className="mt-1 text-sm text-ink/60">{report.reason}{report.details&&` — ${report.details}`}</p><p className="mt-1 text-xs text-ink/40">{new Date(report.createdAt).toLocaleString()}</p></div><div className="flex flex-wrap gap-2">{report.targetType==='listing'&&<button disabled={busyId===report.id} onClick={()=>requestReportAction(report,'remove')} className="rounded-lg bg-red-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">Remove listing</button>}{report.targetType!=='listing'&&<button disabled={busyId===report.id} onClick={()=>requestReportAction(report,'block')} className="rounded-lg bg-red-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">Ban reported user</button>}<button disabled={busyId===report.id} onClick={()=>resolveReport(report,'Reviewing')} className="rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-60">Review</button><button disabled={busyId===report.id} onClick={()=>resolveReport(report,'Resolved')} className="rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-60">Resolve</button><button disabled={busyId===report.id} onClick={()=>resolveReport(report,'Rejected')} className="rounded-lg border px-3 py-2 text-xs font-bold text-red-700 disabled:opacity-60">Reject report</button></div></div></article>)}</div>:<p className="mt-5 rounded-xl bg-cream p-5 text-sm text-ink/55">{loading?'Loading reports…':'No open reports.'}</p>}</section>
@@ -1070,9 +1188,14 @@ function AdminDashboard({products,setProducts,user,categoryData,setCategoryData}
     {confirmation&&<ConfirmDialog title={confirmation.title} message={confirmation.message} confirmLabel={confirmation.confirmLabel} tone={confirmation.tone} busy={confirmBusy} onCancel={()=>setConfirmation(null)} onConfirm={async()=>{setConfirmBusy(true);await confirmation.run();setConfirmBusy(false);setConfirmation(null)}}/>}
   </div>
 }
-function Admin({products,setProducts}) { return <AdminDashboard products={products} setProducts={setProducts} user={null}/> }
+function Admin({products,setProducts}) { return <LegacyAdminDashboard products={products} setProducts={setProducts} user={null}/> }
 function Shops({user,categoryData=categories}) {
   const [shops,setShops]=useState([])
+  const [myShops,setMyShops]=useState([])
+  const [ownerError,setOwnerError]=useState('')
+  const [ownerBusy,setOwnerBusy]=useState(false)
+  const [editingShop,setEditingShop]=useState('')
+  const [shopEditDraft,setShopEditDraft]=useState(null)
   const [loading,setLoading]=useState(true)
   const [loadError,setLoadError]=useState('')
   const [loadRetry,setLoadRetry]=useState(0)
@@ -1097,6 +1220,14 @@ function Shops({user,categoryData=categories}) {
     finally{setLoading(false)}
   }
   useEffect(()=>{loadShops()},[loadRetry])
+  useEffect(()=>{
+    if(!user||!token){setMyShops([]);setOwnerError('');return}
+    let active=true
+    fetch(`${API_BASE}/shops/mine`,{headers:authorization()}).then(readApiResponse).then(records=>{
+      if(active){setMyShops(records);setOwnerError('')}
+    }).catch(err=>{if(active)setOwnerError(err.message||'Unable to load your shop submissions.')})
+    return ()=>{active=false}
+  },[user?.id,loadRetry])
   const addShop=async event=>{
     event.preventDefault()
     setError('');setNotice('')
@@ -1105,12 +1236,26 @@ function Shops({user,categoryData=categories}) {
     try{
       const response=await fetch(`${API_BASE}/shops`,{method:'POST',headers:{...authorization(),'Content-Type':'application/json'},body:JSON.stringify(shopForm)})
       const created=await readApiResponse(response)
-      setShops(current=>[created,...current])
+      setMyShops(current=>[created,...current])
       setShopForm({name:'',category:'General store',location:'Kargil',contactNumber:'',description:''})
       setShowShopForm(false)
-      setNotice('Your shop is listed. Add available goods so customers can browse them.')
+      setNotice('Your shop submission is pending review. It will appear publicly after approval.')
     }catch(err){setError(err.message||'Could not add this shop. Please try again.')}
     finally{setBusy(false)}
+  }
+  const saveShopDetails=async event=>{
+    event.preventDefault()
+    if(!editingShop||!shopEditDraft)return
+    setOwnerBusy(true);setOwnerError('')
+    try{
+      const response=await fetch(`${API_BASE}/shops/${encodeURIComponent(editingShop)}`,{method:'PUT',headers:{...authorization(),'Content-Type':'application/json'},body:JSON.stringify(shopEditDraft)})
+      const updated=await readApiResponse(response)
+      setMyShops(current=>current.map(shop=>shop.id===updated.id?updated:shop))
+      setEditingShop('');setShopEditDraft(null)
+      setNotice(updated.approvalStatus==='pending'?'Your corrected shop details were resubmitted for review.':'Your shop details were saved.')
+      setLoadRetry(value=>value+1)
+    }catch(err){setOwnerError(err.message||'Unable to save your shop details.')}
+    finally{setOwnerBusy(false)}
   }
   const addInventoryItem=async event=>{
     event.preventDefault()
@@ -1144,8 +1289,8 @@ function Shops({user,categoryData=categories}) {
     </section>
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-5 lg:px-8">
     <div className="shop-list-heading"><div><p className="eyebrow">Around Kargil</p><h2 className="editorial-heading">Meet the neighbourhood.</h2></div><p>Register a shop, then share its available inventory with the community.</p></div>
-    {error&&<p role="alert" className="mt-5 rounded-xl bg-red-50 p-4 text-sm font-semibold text-red-700">{error}{!user&&<Link to="/login" className="ml-2 underline">Log in</Link>}</p>}
-    {notice&&<p role="status" className="mt-5 rounded-xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">{notice}</p>}
+    {error&&<Notice kind="error" className="mt-5">{error}{!user&&<Link to="/login" className="ml-2 underline">Log in</Link>}</Notice>}
+    {notice&&<Notice kind="success" className="mt-5">{notice}</Notice>}
     {showShopForm&&<form onSubmit={addShop} className="mt-6 grid gap-3 rounded-2xl bg-white p-5 shadow-sm sm:grid-cols-2">
       <h2 className="text-xl font-black sm:col-span-2">Register your shop</h2>
       <input required maxLength="120" value={shopForm.name} onChange={event=>setShopForm(current=>({...current,name:event.target.value}))} placeholder="Shop name"/>
@@ -1156,13 +1301,22 @@ function Shops({user,categoryData=categories}) {
       <button disabled={busy||!user} className="min-h-11 rounded-xl bg-teal px-4 py-3 font-bold text-white disabled:opacity-50 sm:col-span-2">{busy?'Adding shop…':'Add shop'}</button>
       {!user&&<p className="text-sm text-ink/55 sm:col-span-2">You need to log in before registering a shop. Shop changes are saved to the marketplace database.</p>}
     </form>}
-    {loadError&&!loading&&<div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900"><span>Unable to load local shops: {loadError}</span><button type="button" onClick={()=>setLoadRetry(value=>value+1)} className="rounded-lg bg-amber-800 px-3 py-2 text-white">Try again</button></div>}
+    {user&&<section aria-label="Your shop submissions" className="mt-7 rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
+      <h2 className="text-xl font-semibold">Your shop submissions</h2><p className="mt-1 text-sm text-ink/55">New shops are reviewed before appearing in the public directory.</p>
+      {ownerError&&<Notice kind="error" className="mt-3">{ownerError}</Notice>}
+      {myShops.length? <div className="mt-4 divide-y divide-ink/5">{myShops.map(shop=><article key={shop.id} className="py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">{shop.name}</h3><p className="text-sm text-ink/55">{shop.category} · {shop.location}</p></div><span className="rounded-full bg-cream px-3 py-1 text-xs font-semibold">{shop.approvalStatus==='legacy'?'Legacy · publicly visible':shop.approvalStatus}</span></div>
+        {shop.approvalStatus==='rejected'&&shop.rejectionReason&&<p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">Review reason: {shop.rejectionReason}</p>}
+        {editingShop===shop.id&&shopEditDraft?<form onSubmit={saveShopDetails} className="mt-4 grid gap-3 sm:grid-cols-2"><input required maxLength={120} aria-label="Shop name" value={shopEditDraft.name} onChange={event=>setShopEditDraft(current=>({...current,name:event.target.value}))} className="rounded-xl border px-3 py-2.5"/><input required maxLength={80} aria-label="Shop category" value={shopEditDraft.category} onChange={event=>setShopEditDraft(current=>({...current,category:event.target.value}))} className="rounded-xl border px-3 py-2.5"/><input required maxLength={120} aria-label="Shop location" value={shopEditDraft.location} onChange={event=>setShopEditDraft(current=>({...current,location:event.target.value}))} className="rounded-xl border px-3 py-2.5"/><input maxLength={30} aria-label="Shop contact number" value={shopEditDraft.contactNumber||''} onChange={event=>setShopEditDraft(current=>({...current,contactNumber:event.target.value}))} className="rounded-xl border px-3 py-2.5"/><textarea required maxLength={1000} aria-label="Shop description" value={shopEditDraft.description} onChange={event=>setShopEditDraft(current=>({...current,description:event.target.value}))} className="rounded-xl border px-3 py-2.5 sm:col-span-2"/><div className="flex gap-2 sm:col-span-2"><button disabled={ownerBusy} className="button-dark px-4 py-2.5 text-sm">{ownerBusy?'Saving…':'Save corrections'}</button><button type="button" onClick={()=>{setEditingShop('');setShopEditDraft(null)}} className="button-outline px-4 py-2.5 text-sm">Cancel</button></div></form>:<button type="button" onClick={()=>{setEditingShop(shop.id);setShopEditDraft({name:shop.name,category:shop.category,location:shop.location,contactNumber:shop.contactNumber||'',description:shop.description})}} className="button-outline mt-3 px-3 py-2 text-xs">{shop.approvalStatus==='rejected'?'Correct and resubmit':'Edit shop details'}</button>}
+      </article>)}</div>:<p className="mt-4 text-sm text-ink/50">You have not submitted a shop.</p>}
+    </section>}
+    {loadError&&!loading&&<Notice kind="warning" className="mt-5">Unable to load local shops: {loadError}<button type="button" onClick={()=>setLoadRetry(value=>value+1)} className="ml-3 underline">Try again</button></Notice>}
     {loading?<div className="mt-8 grid gap-5 md:grid-cols-2">{[1,2].map(item=><div key={item} className="skeleton h-64 rounded-2xl bg-white"/> )}</div>
     :shops.length?<div className="mt-8 grid gap-5 lg:grid-cols-2">{shops.map(shop=>{
       const products=shop.products||[]
       const manages=Boolean(user&&shop.ownerId===user.id)
       return       <article key={shop.id} className="shop-record">
-        <div className="shop-record-head"><div className="min-w-0"><p className="eyebrow">LOCAL BUSINESS</p><h3>{shop.name}</h3><p className="shop-location"><MapPin size={15}/>{shop.location}</p>{shop.contactNumber&&<a href={`tel:${shop.contactNumber}`} className="shop-phone">{shop.contactNumber}</a>}</div><span className="shop-category">{shop.category}</span></div>
+        <div className="shop-record-head"><div className="min-w-0"><p className="eyebrow">LOCAL BUSINESS</p><div className="flex flex-wrap items-center gap-2"><h3>{shop.name}</h3>{shop.verified&&<span className="seller-verified"><BadgeCheck size={13}/>Verified business</span>}</div><p className="shop-location"><MapPin size={15}/>{shop.location}</p>{shop.contactNumber&&<a href={`tel:${shop.contactNumber}`} className="shop-phone">{shop.contactNumber}</a>}</div><span className="shop-category">{shop.category}</span></div>
         <p className="shop-description">{shop.description}</p>
         <div className="shop-inventory-heading"><h4>Available goods <span>({products.length})</span></h4>{manages&&<button type="button" onClick={()=>{setItemShopId(current=>current===shop.id?'':shop.id);setError('')}} className="button-outline inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold"><Plus size={14}/>Add goods</button>}</div>
         {manages&&itemShopId===shop.id&&<form onSubmit={addInventoryItem} className="shop-inventory-form mt-3 grid gap-2 sm:grid-cols-2">
@@ -1185,11 +1339,16 @@ function Shops({user,categoryData=categories}) {
 }
 function Hotels({user}) {
   const [hotels, setHotels] = useState([])
+  const [myHotels, setMyHotels] = useState([])
   const [loading, setLoading] = useState(true)
   const [retry, setRetry] = useState(0)
   const [showForm, setShowForm] = useState(false)
+  const [editingHotel, setEditingHotel] = useState('')
+  const [busy, setBusy] = useState(false)
   const [form, setForm] = useState({ name: '', category: 'Hotel & restaurant', location: '', contactNumber: '', description: '', rooms: '', foods: '' })
   const [error, setError] = useState('')
+  const [ownerError, setOwnerError] = useState('')
+  const [notice, setNotice] = useState('')
   useEffect(() => {
     let active=true
     setLoading(true)
@@ -1200,10 +1359,21 @@ function Hotels({user}) {
       .finally(()=>{if(active)setLoading(false)})
     return ()=>{active=false}
   },[retry])
+  useEffect(()=>{
+    const token=localStorage.getItem('campuskart-token')
+    if(!user||!token){setMyHotels([]);setOwnerError('');return}
+    let active=true
+    fetch(`${API_BASE}/hotels/mine`,{headers:{Authorization:`Bearer ${token}`}}).then(readApiResponse).then(records=>{
+      if(active){setMyHotels(records);setOwnerError('')}
+    }).catch(loadError=>{if(active)setOwnerError(loadError.message||'Unable to load your hotel submissions.')})
+    return ()=>{active=false}
+  },[user?.id,retry])
   const update = event => setForm({ ...form, [event.target.name]: event.target.value })
   const addHotel = async event => {
     event.preventDefault()
     setError('')
+    setNotice('')
+    setBusy(true)
     const hotel = {
       ...form,
       rooms: form.rooms.split(',').filter(Boolean).map(room => ({ type: room.trim(), price: 0, available: 0 })),
@@ -1216,12 +1386,42 @@ function Hotels({user}) {
         body: JSON.stringify(hotel)
       })
       const data = await readApiResponse(response)
-      setHotels(current => [...current, data])
+      setMyHotels(current => [data,...current])
       setForm({ name: '', category: 'Hotel & restaurant', location: '', contactNumber: '', description: '', rooms: '', foods: '' })
       setShowForm(false)
+      setNotice('Your hotel submission is pending review. It will appear publicly after approval.')
     } catch (err) {
       setError(err.message)
+    } finally { setBusy(false) }
+  }
+  const editHotel = hotel=>{
+    setEditingHotel(hotel.id)
+    setForm({
+      name:hotel.name||'',category:hotel.category||'',location:hotel.location||'',contactNumber:hotel.contactNumber||'',
+      description:hotel.description||'',rooms:(hotel.rooms||[]).map(room=>room.type).join(', '),foods:(hotel.foods||[]).join(', ')
+    })
+    setShowForm(true)
+  }
+  const saveHotel = async event=>{
+    event.preventDefault()
+    setError('');setNotice('');setBusy(true)
+    const payload={
+      ...form,
+      rooms:form.rooms.split(',').filter(Boolean).map(room=>({type:room.trim(),price:0,available:0})),
+      foods:form.foods.split(',').map(food=>food.trim()).filter(Boolean)
     }
+    try{
+      const token=localStorage.getItem('campuskart-token')
+      const response=await fetch(`${API_BASE}/hotels/${encodeURIComponent(editingHotel)}`,{
+        method:'PUT',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(payload)
+      })
+      const updated=await readApiResponse(response)
+      setMyHotels(current=>current.map(hotel=>hotel.id===updated.id?updated:hotel))
+      setEditingHotel('');setShowForm(false)
+      setNotice(updated.approvalStatus==='pending'?'Your corrected hotel details were resubmitted for review.':'Your hotel details were saved.')
+      setRetry(value=>value+1)
+    }catch(err){setError(err.message||'Unable to save hotel details.')}
+    finally{setBusy(false)}
   }
   return <div className="hotel-page">
     <section className="hotel-masthead">
@@ -1235,12 +1435,14 @@ function Hotels({user}) {
     </section>
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-5 lg:px-8">
       <div className="hotel-list-heading"><div><p className="eyebrow">A place to rest</p><h2 className="editorial-heading">Local stays, thoughtfully found.</h2></div><p>Explore room details, what’s on the menu, and contact each place directly.</p></div>
-      {showForm && user && <form onSubmit={addHotel} className="hotel-form mt-8 grid gap-4 sm:grid-cols-2"><h3 className="text-2xl font-black sm:col-span-2">Introduce your hotel</h3><input required maxLength="120" name="name" value={form.name} onChange={update} placeholder="Hotel name"/><input required maxLength="80" name="category" value={form.category} onChange={update} placeholder="Category"/><input required maxLength="120" name="location" value={form.location} onChange={update} placeholder="Location"/><input required maxLength="30" name="contactNumber" value={form.contactNumber} onChange={update} placeholder="Contact number"/><input required maxLength="1000" name="rooms" value={form.rooms} onChange={update} placeholder="Rooms, separated by commas"/><input required maxLength="4000" name="foods" value={form.foods} onChange={update} placeholder="Foods, separated by commas"/><textarea required maxLength="1500" name="description" value={form.description} onChange={update} placeholder="Hotel description" className="sm:col-span-2"/>{error && <p role="alert" className="text-sm font-semibold text-red-600 sm:col-span-2">{error}</p>}<button className="button-dark py-3 font-semibold sm:col-span-2">Save hotel</button></form>}
-      {error&&<div role="alert" className="api-error mt-5 flex flex-wrap items-center justify-between gap-3 p-4 text-sm font-semibold"><span>{error}</span><button onClick={()=>setRetry(value=>value+1)} className="button-outline px-3 py-2">Retry loading</button></div>}
+      {notice&&<Notice kind="success" className="mt-5">{notice}</Notice>}
+      {showForm && user && <form onSubmit={editingHotel?saveHotel:addHotel} className="hotel-form mt-8 grid gap-4 sm:grid-cols-2"><h3 className="text-2xl font-black sm:col-span-2">{editingHotel?'Update your hotel submission':'Introduce your hotel'}</h3><input required maxLength="120" name="name" value={form.name} onChange={update} placeholder="Hotel name"/><input required maxLength="80" name="category" value={form.category} onChange={update} placeholder="Category"/><input required maxLength="120" name="location" value={form.location} onChange={update} placeholder="Location"/><input required maxLength="30" name="contactNumber" value={form.contactNumber} onChange={update} placeholder="Contact number"/><input required maxLength="1000" name="rooms" value={form.rooms} onChange={update} placeholder="Rooms, separated by commas"/><input required maxLength="4000" name="foods" value={form.foods} onChange={update} placeholder="Foods, separated by commas"/><textarea required maxLength="1500" name="description" value={form.description} onChange={update} placeholder="Hotel description" className="sm:col-span-2"/>{error && <Notice kind="error" className="sm:col-span-2">{error}</Notice>}<div className="flex gap-2 sm:col-span-2"><button disabled={busy} className="button-dark py-3 font-semibold">{busy?'Saving…':editingHotel?'Save corrections':'Submit hotel for review'}</button>{editingHotel&&<button type="button" onClick={()=>{setEditingHotel('');setShowForm(false)}} className="button-outline px-4 py-3 text-sm">Cancel</button>}</div></form>}
+      {user&&<section aria-label="Your hotel submissions" className="mt-7 rounded-2xl border border-ink/10 bg-white p-5 shadow-sm"><h2 className="text-xl font-semibold">Your hotel submissions</h2><p className="mt-1 text-sm text-ink/55">New hotels are reviewed before appearing in the public directory.</p>{ownerError&&<Notice kind="error" className="mt-3">{ownerError}</Notice>}{myHotels.length?<div className="mt-4 divide-y divide-ink/5">{myHotels.map(hotel=><article key={hotel.id} className="py-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">{hotel.name}</h3><p className="text-sm text-ink/55">{hotel.category} · {hotel.location}</p></div><span className="rounded-full bg-cream px-3 py-1 text-xs font-semibold">{hotel.approvalStatus==='legacy'?'Legacy · publicly visible':hotel.approvalStatus}</span></div>{hotel.approvalStatus==='rejected'&&hotel.rejectionReason&&<p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">Review reason: {hotel.rejectionReason}</p>}<button type="button" onClick={()=>editHotel(hotel)} className="button-outline mt-3 px-3 py-2 text-xs">{hotel.approvalStatus==='rejected'?'Correct and resubmit':'Edit hotel details'}</button></article>)}</div>:!ownerError?<p className="mt-4 text-sm text-ink/50">You have not submitted a hotel.</p>:null}</section>}
+      {error&&<Notice kind="error" className="mt-5">{error}<button onClick={()=>setRetry(value=>value+1)} className="ml-3 underline">Retry loading</button></Notice>}
       {loading?<p role="status" className="hotel-loading mt-10 p-10 text-center">Loading hotel listings…</p>:!hotels.length&&!error?<p className="hotel-empty mt-10 p-12 text-center">No hotel listings are available yet.</p>:null}
       <div className="hotel-list mt-8">{hotels.map((hotel,index)=><article key={hotel.id} className="hotel-record" data-reveal>
         <div className="hotel-record-index">0{index+1}</div>
-        <div className="hotel-record-main"><div className="hotel-record-title"><div><p className="eyebrow">{hotel.category}</p><h3>{hotel.name}</h3></div><span className="hotel-location"><MapPin size={15}/>{hotel.location}</span></div><p className="hotel-description">{hotel.description}</p>
+        <div className="hotel-record-main"><div className="hotel-record-title"><div><p className="eyebrow">{hotel.category}</p><div className="flex flex-wrap items-center gap-2"><h3>{hotel.name}</h3>{hotel.verified&&<span className="seller-verified"><BadgeCheck size={13}/>Verified business</span>}</div></div><span className="hotel-location"><MapPin size={15}/>{hotel.location}</span></div><p className="hotel-description">{hotel.description}</p>
           <div className="hotel-details-grid"><div><h4>Rooms</h4>{(hotel.rooms||[]).length?<div className="hotel-rooms">{hotel.rooms.map(room=><div key={room.type} className="hotel-room"><b>{room.type}</b><span>{formatINR(room.price)} / night</span><small>{room.available} available</small></div>)}</div>:<p className="hotel-detail-empty">Contact the hotel for room details.</p>}</div><div><h4>Food & dining</h4>{(hotel.foods||[]).length?<div className="hotel-foods">{hotel.foods.map(food=><span key={food}>{food}</span>)}</div>:<p className="hotel-detail-empty">Contact the hotel for menu details.</p>}</div></div>
         </div>
         <div className="hotel-record-action"><a href={`tel:${hotel.contactNumber}`} className="hotel-call-link"><span><small>CALL TO ENQUIRE</small><b>{hotel.contactNumber}</b></span><ArrowRight size={18}/></a></div>
@@ -1248,9 +1450,31 @@ function Hotels({user}) {
     </div>
   </div>
 }
-function AuthCallback({setUser}) { const [params]=useSearchParams(); const nav=useNavigate(); useEffect(()=>{ const token=params.get('token'); if(!token){nav('/login');return} localStorage.setItem('campuskart-token',token); fetch(`${API_BASE}/me`,{headers:{Authorization:`Bearer ${token}`}}).then(r=>r.json()).then(data=>{ if(data.user){localStorage.setItem('campuskart-user',JSON.stringify(data.user));setUser(data.user);nav('/profile')} else nav('/login') }).catch(()=>nav('/login')) },[nav,params,setUser]); return <div className="mx-auto max-w-md px-5 py-20 text-center">Signing you in?</div> }
 function About(){return <div className="mx-auto max-w-5xl px-5 py-12 lg:px-8"><div className="rounded-3xl bg-ink p-8 text-white sm:p-12"><p className="text-sm font-bold uppercase tracking-widest text-mint">About Kargil Marketplace</p><h1 className="mt-3 text-4xl font-black sm:text-5xl">Built for local buying and selling.</h1><p className="mt-5 max-w-2xl text-lg leading-relaxed text-white/70">Kargil Marketplace is a local digital marketplace created to make it easier for people in Kargil to discover products, support nearby shops, and buy or sell useful goods with confidence.</p></div><div className="mt-8 grid gap-6 md:grid-cols-2"><article className="rounded-2xl bg-white p-7 shadow-sm"><p className="text-sm font-bold uppercase tracking-widest text-teal">Created by</p><h2 className="mt-3 text-2xl font-black">Nassir Hussain</h2><p className="mt-3 leading-relaxed text-ink/65">Nassir Hussain created Kargil Marketplace as a practical local-commerce project for connecting customers, independent sellers, and shops through one simple platform.</p></article><article className="rounded-2xl bg-white p-7 shadow-sm"><p className="text-sm font-bold uppercase tracking-widest text-teal">Our goal</p><h2 className="mt-3 text-2xl font-black">Local goods, shared simply.</h2><p className="mt-3 leading-relaxed text-ink/65">The platform is designed to help local businesses present their available goods online, help people find products nearby, and create a stronger digital marketplace for Kargil.</p></article></div><div className="mt-8 rounded-2xl border border-teal/10 bg-mint/50 p-7"><h2 className="text-2xl font-black">What you can do here</h2><div className="mt-5 grid gap-3 text-sm text-ink/70 sm:grid-cols-3"><span>Browse local products</span><span>Discover nearby shops</span><span>List items for sale</span><span>Save products</span><span>Contact sellers</span><span>Explore shop goods</span></div></div></div>}
 function Footer(){return <footer className="editorial-footer"><div className="editorial-footer-inner mx-auto max-w-7xl px-5 lg:px-8"><div className="footer-topline"><span>ROOTED IN KARGIL. OPEN TO EVERYONE HERE.</span><span>BUY · SELL · CONNECT LOCALLY</span></div><div className="footer-main"><div className="footer-brand"><Link to="/" className="footer-wordmark">Kargil<span>.</span></Link><p>A more thoughtful way to find, share, and support what’s close to home.</p><Link to="/marketplace" className="footer-cta">Explore the marketplace <ArrowRight size={16}/></Link></div><div className="footer-link-group"><p>DISCOVER</p><Link to="/marketplace">Marketplace</Link><Link to="/shops">Local shops</Link><Link to="/hotels">Hotels & stays</Link></div><div className="footer-link-group"><p>COMMUNITY</p><Link to="/sell">List an item</Link><Link to="/about">About & help</Link><Link to="/#safety">Safety tips</Link></div></div><div className="footer-bottom"><span>© {new Date().getFullYear()} Kargil Marketplace</span><span>Made for our local community.</span></div></div></footer>}
+function EditorialAbout() {
+  return <div className="editorial-about">
+    <section className="editorial-about-hero"><p className="eyebrow">Local by nature · Kargil & Ladakh</p><h1>Closer to what<br/><em>matters locally.</em></h1><p>A thoughtful place to find useful things, share what you no longer need, and discover independent shops and stays across the region.</p><Link to="/marketplace" className="button-light px-5 py-3 text-sm font-semibold">Explore the marketplace <ArrowRight size={16}/></Link><span className="editorial-about-index">01 / COMMUNITY</span></section>
+    <section className="editorial-about-story"><div><p className="eyebrow">Made for nearby connection</p><h2>One local place.<br/><em>Many ways to connect.</em></h2></div><p>Kargil Marketplace brings together individual listings, local shop inventory and hotel information while keeping those experiences distinct. Browse as a guest, or create an account to save items, contact sellers and manage your own listings.</p></section>
+    <section className="editorial-about-links"><Link to="/shops"><span>01</span><strong>Independent shops</strong><ArrowRight size={17}/></Link><Link to="/hotels"><span>02</span><strong>Hotels & stays</strong><ArrowRight size={17}/></Link><Link to="/sell"><span>03</span><strong>List something useful</strong><ArrowRight size={17}/></Link></section>
+  </div>
+}
+function TrustDocument({kind}) {
+  const privacy=kind==='privacy'
+  const sections=privacy?[
+    ['Information used by the marketplace','Account information can include your name, email address, phone number, profile details and sign-in provider identifiers. Google sign-in returns account details permitted by Google, such as name, email and profile image. Listings can include descriptions, photos, prices, categories, locations and optional coordinates. Conversations, ratings and reports are stored to provide their respective marketplace features.'],
+    ['How information is used','The service uses this information to authenticate accounts, publish and manage listings, show local results, support buyer-seller conversations, handle reports and operate account features. Public seller and listing responses omit private account fields; exact listing coordinates are not included in public product responses.'],
+    ['Storage and service providers','Marketplace records are stored in the configured MongoDB database. The browser stores the authentication token and a display copy of the signed-in profile in local storage. Google handles Google authentication. Email and SMS verification may be routed through Resend or Twilio when those providers are configured. Their own terms and privacy notices apply to their services.'],
+    ['Choices and retention','You can edit profile details, remove listings you control and sign out to clear the browser’s current authentication state. Some records, such as conversations, reports or account-related data, may remain in the service database when required to operate the marketplace. The current application does not provide self-service account deletion.']
+  ]:[
+    ['Using the marketplace','Use an accurate account and provide truthful, lawful listing descriptions, prices, condition and location details. Do not post unlawful, unsafe, misleading or prohibited content, impersonate others, harass users, or misuse contact information.'],
+    ['Buying and selling','Listings are offers from their respective users or businesses. Buyers and sellers are responsible for confirming an item, its condition, price, availability and meeting arrangements directly. The current service does not process payments, provide escrow, arrange delivery or reserve hotel rooms. Room counts shown by a hotel are information supplied in its listing, not a booking guarantee.'],
+    ['Accounts and content','You are responsible for activity carried out through your account and for having the rights needed to submit listing text and images. The marketplace may restrict or remove content or accounts that violate these terms or applicable requirements.'],
+    ['Service limits','The marketplace helps people discover and contact one another; it does not guarantee the accuracy of user-submitted content, a transaction outcome, seller identity beyond the account verification signals shown, or uninterrupted service. Use care and inspect goods before paying.']
+  ]
+  return <div className="trust-document mx-auto max-w-5xl px-5 py-12 lg:px-8"><header><p className="eyebrow">Kargil Marketplace · {privacy?'Your information':'Community guidelines'}</p><h1>{privacy?'Privacy overview':'Terms of use'}</h1><p>{privacy?'A plain-language summary of the information the current product handles.':'Guidelines for using listings, shops, hotels and marketplace communication.'}</p></header><div className="trust-document-sections">{sections.map(([title,body],index)=><section key={title}><span>{String(index+1).padStart(2,'0')}</span><div><h2>{title}</h2><p>{body}</p></div></section>)}</div><p className="trust-document-note">These pages describe the application’s current behavior and are not legal advice. Have the terms and privacy information reviewed for your operating jurisdiction before relying on them as formal legal documents.</p></div>
+}
+function LegalFooterLinks(){return <nav className="legal-footer-links" aria-label="Legal information"><Link to="/privacy">Privacy</Link><Link to="/terms">Terms of use</Link></nav>}
 function Messages({user}) {
   const [searchParams,setSearchParams]=useSearchParams()
   const nav=useNavigate()
@@ -1347,7 +1571,7 @@ function Messages({user}) {
   return <div className="mx-auto max-w-6xl px-4 py-8 sm:px-5 lg:px-8">
     <h1 className="text-3xl font-black sm:text-4xl">Messages</h1>
     <p className="mt-2 text-ink/55">Talk directly with buyers and sellers, and negotiate a fair price.</p>
-    {error&&<p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}
+    {error&&<Notice kind="error" className="mt-4">{error}</Notice>}
     <div className="mt-8 grid min-h-[520px] overflow-hidden rounded-2xl bg-white shadow-sm md:grid-cols-[300px_1fr]">
       <aside className="border-b md:border-b-0 md:border-r">
         <div className="border-b p-4 font-bold">Conversations ({conversations.length}){unreadTotal>0&&<span className="ml-2 rounded-full bg-coral px-2 py-1 text-xs text-white">{unreadTotal} unread</span>}</div>

@@ -27,3 +27,21 @@ test('production refuses sample seeding and partial provider settings', () => {
 test('development can run without production-only providers', () => {
   assert.deepEqual(validateServerEnvironment({ NODE_ENV: 'development' }), [])
 })
+
+test('Google OAuth requires an API origin and a separate allowed primary frontend origin', () => {
+  const config = {
+    NODE_ENV: 'production',
+    MONGODB_URI: 'configured',
+    JWT_SECRET: 'configured',
+    OTP_HASH_SECRET: 'configured',
+    ADMIN_EMAILS: 'admin@example.invalid',
+    FRONTEND_URL: 'https://kargil-market-place.vercel.app,https://preview.example.invalid',
+    OAUTH_FRONTEND_URL: 'https://kargil-market-place.vercel.app',
+    API_URL: 'https://kargil-marketplace1.onrender.com/api/',
+    GOOGLE_CLIENT_ID: 'configured',
+    GOOGLE_CLIENT_SECRET: 'configured'
+  }
+  assert.deepEqual(validateServerEnvironment(config), [])
+  assert.match(validateServerEnvironment({ ...config, OAUTH_FRONTEND_URL: 'https://other.example.invalid' }).join(' '), /must exactly match/)
+  assert.match(validateServerEnvironment({ ...config, API_URL: 'http://localhost:3001' }).join(' '), /public HTTPS URL/)
+})

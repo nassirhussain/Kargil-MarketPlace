@@ -52,6 +52,7 @@ router.put('/reorder', requireAuth, async (req, res, next) => {
 router.put('/:id', requireAuth, async (req, res, next) => {
   try {
     if (!isAdmin(req.user)) return res.status(403).json({ error: 'Admin access required' })
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Category not found' })
     const updates = {}
     if (req.body.name !== undefined) {
       if (typeof req.body.name !== 'string' || !req.body.name.trim() || req.body.name.trim().length > 80) return res.status(400).json({ error: 'Enter a category name up to 80 characters' })
@@ -64,6 +65,9 @@ router.put('/:id', requireAuth, async (req, res, next) => {
     }
     if (req.body.active !== undefined) {
       if (typeof req.body.active !== 'boolean') return res.status(400).json({ error: 'Category active must be true or false' })
+      if (!req.body.active && await Category.countDocuments({ active: true }) <= 1) {
+        return res.status(409).json({ error: 'At least one active category must remain available.' })
+      }
       updates.active = req.body.active
     }
     if (req.body.order !== undefined) {
@@ -82,6 +86,10 @@ router.put('/:id', requireAuth, async (req, res, next) => {
 router.delete('/:id', requireAuth, async (req, res, next) => {
   try {
     if (!isAdmin(req.user)) return res.status(403).json({ error: 'Admin access required' })
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Category not found' })
+    if (await Category.countDocuments({ active: true }) <= 1) {
+      return res.status(409).json({ error: 'At least one active category must remain available.' })
+    }
     const category = await Category.findByIdAndUpdate(req.params.id, { $set: { active: false } }, { new: true })
     if (!category) return res.status(404).json({ error: 'Category not found' })
     res.json({ id: String(category._id), active: false, message: 'Category deactivated. Existing listings remain unchanged.' })

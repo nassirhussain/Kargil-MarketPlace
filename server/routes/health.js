@@ -6,7 +6,7 @@ router.get('/', (req, res) => {
   res.status(ready ? 200 : 503).json({
     status: ready ? 'ok' : 'unavailable',
     service: 'kargil-marketplace-api',
-    mongo: { status: mongoState.status, error: mongoState.error }
+    mongo: { status: mongoState.status }
   })
 })
 export default router
